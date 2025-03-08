@@ -9,5 +9,5 @@ plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: config-weaver-operator
-repo: github.com/k-stz/config-weaver
+repo: github.com/k-stz/config-weaver-operator
 version: "3"
