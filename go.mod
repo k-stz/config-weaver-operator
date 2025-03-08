@@ -1,4 +1,4 @@
-module github.com/k-stz/config-weaver
+module github.com/k-stz/config-weaver-operator
 
 go 1.22.0
 

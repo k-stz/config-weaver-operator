@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/k-stz/config-weaver/test/utils"
+	"github.com/k-stz/config-weaver-operator/test/utils"
 )
 
 const namespace = "config-weaver-operator-system"

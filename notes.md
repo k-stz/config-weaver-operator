@@ -65,7 +65,6 @@ spec:
               number: 80
 ```
 
-
 ## Other
 Provide hostpath as pvc in k3d cluster:
 ```sh
@@ -78,3 +77,6 @@ Load local image into k3d:
 # Apparently those get loaded on the host nodes, not in the k3d registry. The registry has to be cretad separetly and included in the cluster (k3d registry create)
 k3d image import <imagename> -c my-cluster
 ```
+
+## `k9s` instead of kubernetes dashboard
+Use `k9s` instead off the kubernetes dashboard. It's way more lightweight and doesn't need to be run in the cluster.
