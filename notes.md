@@ -80,3 +80,18 @@ k3d image import <imagename> -c my-cluster
 
 ## `k9s` instead of kubernetes dashboard
 Use `k9s` instead off the kubernetes dashboard. It's way more lightweight and doesn't need to be run in the cluster.
+
+# Operator-SDK Workflow
+1. Create Project:
+```
+operator-sdk init --domain example.com --repo github.com/k-stz/config-weaver-operator
+```
+Create an APIGroup and a first Resource:
+```
+operator-sdk create api --group weaver --version v1alpha
+1 --kind ConfigMapSync
+```
+
+
+The resulting APIGroup  will be what you pass as --group in kubebuilder `create api` plus what you set as --domain in `operator-sdk init --domain`.
+So in this case will be `weaver.example.com`
