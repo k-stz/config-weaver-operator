@@ -1,32 +1,23 @@
----
+# permissions for end users to view configmapsyncs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  labels:
+    app.kubernetes.io/name: config-weaver-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: configmapsync-viewer-role
 rules:
 - apiGroups:
   - weaver.example.com
   resources:
   - configmapsyncs
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
-- apiGroups:
-  - weaver.example.com
-  resources:
-  - configmapsyncs/finalizers
-  verbs:
-  - update
 - apiGroups:
   - weaver.example.com
   resources:
   - configmapsyncs/status
   verbs:
   - get
-  - patch
-  - update
