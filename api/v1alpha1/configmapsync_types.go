@@ -28,17 +28,24 @@ type ConfigMapSyncSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of ConfigMapSync. Edit configmapsync_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Test field
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	TestNum int32 `json:"size,omitempty"`
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	SourceNamespace string `json:"sourceNamespace,omitempty"`
 }
 
 // ConfigMapSyncStatus defines the observed state of ConfigMapSync
 type ConfigMapSyncStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	// +operator-sdk:csv:customresourcedefinitions:type=status
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 // +kubebuilder:object:root=true
+// enables the "/status" subresource on a CRD.
 // +kubebuilder:subresource:status
 
 // ConfigMapSync is the Schema for the configmapsyncs API
