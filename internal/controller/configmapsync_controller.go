@@ -19,18 +19,19 @@ package controller
 import (
 	"context"
 
+	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
 )
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
 type ConfigMapSyncReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete

@@ -88,8 +88,7 @@ operator-sdk init --domain example.com --repo github.com/k-stz/config-weaver-ope
 ```
 Create an APIGroup and a first Resource:
 ```
-operator-sdk create api --group weaver --version v1alpha
-1 --kind ConfigMapSync
+operator-sdk create api --group weaver --version v1alpha1 --kind ConfigMapSync --resource --controller
 ```
 
 
