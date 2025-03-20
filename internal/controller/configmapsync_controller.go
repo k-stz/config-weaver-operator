@@ -20,6 +20,7 @@ import (
 	"context"
 
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -49,7 +50,6 @@ type ConfigMapSyncReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
-
 	// TODO(user): your logic here
 
 	return ctrl.Result{}, nil
@@ -58,6 +58,11 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // SetupWithManager sets up the controller with the Manager.
 func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		// Watch ConfigMapSync CR and trigger reconciliation on 
+		// Add/Update/Delete events
 		For(&weaverv1alpha1.ConfigMapSync{}).
+		// Watch the ConfigMap managed by the ConfigMapSync controller , also
+		// triggereing reconciliation
+		Owns(&v1.ConfigMap{}).
 		Complete(r)
 }
