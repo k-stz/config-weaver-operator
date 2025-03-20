@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -58,11 +59,14 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // SetupWithManager sets up the controller with the Manager.
 func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		// Watch ConfigMapSync CR and trigger reconciliation on 
+		// Watch ConfigMapSync CR and trigger reconciliation on
 		// Add/Update/Delete events
 		For(&weaverv1alpha1.ConfigMapSync{}).
 		// Watch the ConfigMap managed by the ConfigMapSync controller , also
 		// triggereing reconciliation
 		Owns(&v1.ConfigMap{}).
+		// You can set many more options here, for example the number
+		// of concurrent reconciles (default is one) with:
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }
