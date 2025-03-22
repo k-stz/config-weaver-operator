@@ -23,6 +23,7 @@ import (
 	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -61,11 +62,37 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err := r.Get(ctx, req.NamespacedName, configMapSync)
 	if err != nil {
 		fmt.Println("Failed Getting configMapSync, err", err)
+		// This is an error request
 		return ctrl.Result{}, nil
 	}
 	fmt.Println("ConfigMapSync content:", configMapSync)
+	// So now we have a ConfigMapSync object, lets
+	// try to create a configmap
+	cm := r.createConfigMapTest(ctx, configMapSync)
+	fmt.Println("Create cm:", cm.Name, cm.Namespace)
+	err = r.Create(ctx, cm)
+	if err != nil {
+		fmt.Println("cm couldn'T be created:", err)
+	}
 
 	return ctrl.Result{}, nil
+
+	// To reconcile again after X time
+	// thus implementing best practice of
+	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) *v1.ConfigMap {
+
+	cm := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "createdbymycontroller",
+			Namespace: "default",
+		},
+	}
+
+	// Set Owner Reference!
+	return cm
 }
 
 // SetupWithManager sets up the controller with the Manager.
