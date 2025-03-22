@@ -18,14 +18,16 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
-	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -42,6 +44,9 @@ type ConfigMapSyncReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
+// It runs each time an event occurs on a watched CR/resource and will return some
+// value dependingon whether those state match or not
+// Every Controller has a Reconciler object with a Reconcile method
 // TODO(user): Modify the Reconcile function to compare the state specified by
 // the ConfigMapSync object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
@@ -51,7 +56,14 @@ type ConfigMapSyncReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
-	// TODO(user): your logic here
+	// First lookup Watched ConfigMapSync
+	configMapSync := &v1alpha1.ConfigMapSync{}
+	err := r.Get(ctx, req.NamespacedName, configMapSync)
+	if err != nil {
+		fmt.Println("Failed Getting configMapSync, err", err)
+		return ctrl.Result{}, nil
+	}
+	fmt.Println("ConfigMapSync content:", configMapSync)
 
 	return ctrl.Result{}, nil
 }
@@ -68,5 +80,10 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// You can set many more options here, for example the number
 		// of concurrent reconciles (default is one) with:
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		// Furthermore "Predicates" can be added using
+		// .WithEvntFilter(<predicate.Predicate>) which
+		// can filter events by type (create, update,delete)
+		// and content, mainly traffic to API server from
+		// Reconcile()
 		Complete(r)
 }
