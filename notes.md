@@ -1,10 +1,14 @@
 # Setup `k3d`
+In order to connect to the cluster from a remote machine, we need to
+set in the cert the san.
+
 ```sh
 # create registry with specific port
 k3d registry create myregistry -p 43761
 # create cluster with dedicated registry
-k3d cluster create mycluster --agents 1 -p "8080:80@loadbalancer" -p "8443:443@loadbalancer" --registry-use k3d-myregistry
+k3d cluster create mycluster --agents 1 -p "9000:80@loadbalancer" -p "8443:443@loadbalancer" --registry-use k3d-myregistry
 ```
+
 
 Push images to docker local k3d image registry
 ```sh
@@ -30,10 +34,56 @@ curl k3d-myregistry:5000/v2/app_flask/tags/list
 ```
 `k3d` links the reigstry at the Docker network level, not as a Kubernetes Service. So you won't find it via `kubectl get services -A`
 
+## Raspi
+### Problem: Hanging k3d-mycluster-server-0:
+Problems starting k3d, hanging on `Starting node 'k3d-mycluster-server-0'`. Resolved by adding to `cgroup_enable=memory` to /boot/cmdline.txt and restarting the raspi: 
+```sh
+root@raspberrypi:/boot# cat /boot/cmdline.txt 
+console=serial0,115200 console=tty1 root=/dev/mmcblk0p7 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet splash plymouth.ignore-serial-consoles cgroup_enable=memory
+```
+
+After launching k3d on raspi, you can connect to it by fetching the kubeconfig.
+`k3d kubeconfig`
+
+## Problem: x509
+After saving the kubeconfig to the config of the machine you want to use to connect to the raspi with the following:
+```sh
+ssh user@k3draspi sudo k3d kubeconfig get mycluster > ~/.kube/config
+```
+When you attempt to use it:
+```sh
+$ kubectl get pods
+E0324 00:11:02.015114  708640 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://0.0.0.0:34067/api?timeout=32s\": dial tcp 0.0.0.0:34067: connect: connection refused"
+The connection to the server 0.0.0.0:34067 was refused - did you specify the right host or port?
+```
+Ok so you update the kubeconfig to match the ip of the remote for example
+`sed -i s/0.0.0.0/raspi/g ~/.kube/config`
+
+Then when you run again you get an tls error:
+```sh
+kubectl get pods
+...
+E0324 00:18:40.972066  709578 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://raspi:34067/api?timeout=32s\": tls: failed to verify certificate: x509: certificate is valid for k3d-mycluster-server-0, k3d-mycluster-serverlb, kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, localhost, not raspi"
+Unable to connect to the server: tls: failed to verify certificate: x509: certificate is valid for k3d-mycluster-server-0, k3d-mycluster-serverlb, kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, localhost, not raspi
+```
+
+You can fix this in three ways:
+- cli ignore: `kubectl get pods --insecure-skip-tls-verify` 
+- kubeconfig (not production use):
+  under clusters set:
+```yaml
+clusters:
+- cluster:
+  # you have to certifcate-authority-data: ... for it to work, else
+  # kubectl will throw "error: specifing a root certificate file with insecure flag is not allowed..."
+  server: https://raspi:36809
+  insecure-skip-tls-verify: true
+```
+
+This finally works, but isn't there a simpler solution? It used to work that you could set on k3d cluster creation the tls-san.
 
 
-
-## Deploy pod using image from internal registry
+# Deploy pod using image from internal registry
 Finally run the newly pushed image in k3d cluster, note that you always have to provide the registry, else docker.io is implied and it will not find it:
 ```sh
 kubectl run app-flask --image=k3d-myregistry:43761/app_flask:latest
