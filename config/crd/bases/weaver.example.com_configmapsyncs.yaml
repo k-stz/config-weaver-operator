@@ -39,12 +39,12 @@ spec:
           spec:
             description: ConfigMapSyncSpec defines the desired state of ConfigMapSync
             properties:
-              size:
-                description: Test field
-                format: int32
-                type: integer
               sourceNamespace:
                 type: string
+              testNum:
+                description: This comment will be used as the description of the field!
+                format: int32
+                type: integer
             type: object
           status:
             description: ConfigMapSyncStatus defines the observed state of ConfigMapSync
