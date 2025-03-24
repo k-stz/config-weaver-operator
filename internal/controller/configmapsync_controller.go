@@ -73,6 +73,11 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err = r.Create(ctx, cm)
 	if err != nil {
 		fmt.Println("cm couldn'T be created:", err)
+		// maybe it already exists so lets try to update an existing one
+		err := r.Update(ctx, cm)
+		if err != nil {
+			fmt.Println("r.Update(ctx, cm) err:", err)
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -84,10 +89,17 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) *v1.ConfigMap {
 
+	testNum := configMapSync.Spec.TestNum
+	testNumString := fmt.Sprintf("%d", testNum)
+
 	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "createdbymycontroller",
 			Namespace: "default",
+		},
+		//Data["testData"] = "hi",
+		Data: map[string]string{
+			"testNum": testNumString,
 		},
 	}
 
