@@ -2,12 +2,13 @@
 In order to connect to the cluster from a remote machine, we need to
 set in the cert the san.
 
+With the following we create the cluster that will in its SAN for the api server servce, among other defaults, the hostname "raspik3d". So make sure in your `/etc/hosts` to resolve it to this clusters ip.
 ```sh
-# create registry with specific port
-k3d registry create myregistry -p 43761
-# create cluster with dedicated registry
-k3d cluster create mycluster --agents 1 -p "9000:80@loadbalancer" -p "8443:443@loadbalancer" --registry-use k3d-myregistry
+k3d cluster create mycluster --agents 1 -p "9000:80@loadbalancer" -p "8443:443@loadbalancer" --registry-use k3d-myregistry --k3s-arg "--tls-san=raspik3d@server:0"
 ```
+The syntax `@server:0` is a nodefilter in k3d jargon. It will refer to the
+nodes (list them with `k3d node list`) with the name `k3d-mycluster-server-0`
+which has the role "server" and will host the kube-apiserver.
 
 
 Push images to docker local k3d image registry
@@ -57,7 +58,7 @@ E0324 00:11:02.015114  708640 memcache.go:265] "Unhandled Error" err="couldn't g
 The connection to the server 0.0.0.0:34067 was refused - did you specify the right host or port?
 ```
 Ok so you update the kubeconfig to match the ip of the remote for example
-`sed -i s/0.0.0.0/raspi/g ~/.kube/config`
+`sed -i s/0.0.0.0/raspik3d/g ~/.kube/config`
 
 Then when you run again you get an tls error:
 ```sh
@@ -66,6 +67,8 @@ kubectl get pods
 E0324 00:18:40.972066  709578 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://raspi:34067/api?timeout=32s\": tls: failed to verify certificate: x509: certificate is valid for k3d-mycluster-server-0, k3d-mycluster-serverlb, kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, localhost, not raspi"
 Unable to connect to the server: tls: failed to verify certificate: x509: certificate is valid for k3d-mycluster-server-0, k3d-mycluster-serverlb, kubernetes, kubernetes.default, kubernetes.default.svc, kubernetes.default.svc.cluster.local, localhost, not raspi
 ```
+Which means that though we do trust the certificate, it's in the kubeconfig, we failed to verify it. The verification failed because the cert is
+valid for a different SAN (`Subject Alternative Name`) than what we're using and it lists the SANs. 
 
 You can fix this in three ways:
 - cli ignore: `kubectl get pods --insecure-skip-tls-verify` 
@@ -79,9 +82,22 @@ clusters:
   server: https://raspi:36809
   insecure-skip-tls-verify: true
 ```
+- Or we can simply add one of the SANs on the certificate to `/etc/hosts` and use that as the server in the kubeconfig like `k3d-mycluster-server-0`:
+```file
+<ip-k3d-hosting-machine> k3d-mycluster-server-0
+```
+And update it in the clusters server entry in the kubeconfig:
+`sed -i ~/.kube/config s/0.0.0.0/k3d-mycluster-server-0/g`
 
-This finally works, but isn't there a simpler solution? It used to work that you could set on k3d cluster creation the tls-san.
-
+Finally, it might be possible to adjust the certificate SANs by creating the k3d cluster by passing a `--config`, there we provide a Kind-Yaml
+that under options.k3s.extraArgs allows to pass tls-san:
+```yaml
+  k3s: # options passed on to K3s itself
+    extraArgs: # additional arguments passed to the `k3s server|agent` command; same as `--k3s-arg`
+      - arg: --tls-san=my.host.domain  #<- here
+        nodeFilters:
+          - server:*
+```
 
 # Deploy pod using image from internal registry
 Finally run the newly pushed image in k3d cluster, note that you always have to provide the registry, else docker.io is implied and it will not find it:
