@@ -28,9 +28,9 @@ type ConfigMapSyncSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Test field
+	// This comment will be used as the description of the field!
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	TestNum int32 `json:"size,omitempty"`
+	TestNum int32 `json:"testNum,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	SourceNamespace string `json:"sourceNamespace,omitempty"`
 }
