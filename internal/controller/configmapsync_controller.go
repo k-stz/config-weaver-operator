@@ -56,30 +56,38 @@ type ConfigMapSyncReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	log := log.FromContext(ctx).WithName("Reconcile") // prepends name to log lines
+
+	if log.Enabled() {
+		log.Info("Reconcile invoked with Request: " + req.String())
+	}
+
 	// First lookup Watched ConfigMapSync
+	// We need a pointer so r.Get() can write the object to it
 	configMapSync := &v1alpha1.ConfigMapSync{}
 	err := r.Get(ctx, req.NamespacedName, configMapSync)
 	if err != nil {
-		fmt.Println("Failed Getting configMapSync, err", err)
-		// This is an error request
-		return ctrl.Result{}, nil
+		log.Error(err, "Failed Getting configMapSync")
+		return ctrl.Result{}, err
 	}
-	fmt.Println("ConfigMapSync content:", configMapSync)
+	log.Info("ConfigMapSync testNum:" + string(configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
 	cm := r.createConfigMapTest(ctx, configMapSync)
-	fmt.Println("Create cm:", cm.Name, cm.Namespace)
+	log.Info("Creating ConfigMap", cm.Name, cm.Namespace)
 	err = r.Create(ctx, cm)
 	if err != nil {
-		fmt.Println("cm couldn'T be created:", err)
+		log.Error(err, "ConfigMap couldn't be created")
 		// maybe it already exists so lets try to update an existing one
-		err := r.Update(ctx, cm)
+		log.Info("Attempting to r.Update() existing ConfigMap...")
+		err := r.Update(ctx, cm) // works! Will reconcile!!!
 		if err != nil {
-			fmt.Println("r.Update(ctx, cm) err:", err)
+			log.Error(err, "r.Update(ctx, cm) failed", err)
 		}
+		log.Info("ConfigMap " + cm.Name + " Updated.")
 	}
 
+	// No error => stops Reconcile
 	return ctrl.Result{}, nil
 
 	// To reconcile again after X time
@@ -88,7 +96,8 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) *v1.ConfigMap {
-
+	log := log.FromContext(ctx).WithName("createConfigMapTest")
+	log.Info("Entered")
 	testNum := configMapSync.Spec.TestNum
 	testNumString := fmt.Sprintf("%d", testNum)
 
