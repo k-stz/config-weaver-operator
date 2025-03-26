@@ -11,13 +11,18 @@ spec:
     kind: ConfigMapSync
     listKind: ConfigMapSyncList
     plural: configmapsyncs
+    shortNames:
+    - cms
+    - cmsync
     singular: configmapsync
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ConfigMapSync is the Schema for the configmapsyncs API
+        description: |-
+          enables the "/status" subresource on a CRD.
+          ConfigMapSync is the Schema for the configmapsyncs API
         properties:
           apiVersion:
             description: |-
