@@ -160,3 +160,13 @@ operator-sdk create api --group weaver --version v1alpha1 --kind ConfigMapSync -
 
 The resulting APIGroup  will be what you pass as --group in kubebuilder `create api` plus what you set as --domain in `operator-sdk init --domain`.
 So in this case will be `weaver.example.com`
+
+# Orphane cascading deletion
+Astonishingly orphan deletion kubectl syntax is very picks:
+```sh
+# works:
+kubectl delete configmapsyncs.weaver.example.com configmapsync-sample --cascade=orphan
+# doesn't work!
+# In this case the --cascade=orphan must use an equal sign for the option!
+kubectl delete configmapsyncs.weaver.example.com configmapsync-sample --cascade orphan
+```
