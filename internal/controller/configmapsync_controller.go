@@ -75,12 +75,26 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// try to create a configmap
 	cm := r.createConfigMapTest(ctx, configMapSync)
 	log.Info("Creating ConfigMap", cm.Name, cm.Namespace)
+
+	// First Set Owner reference
+	log.Info("Attempting to set ownerReference")
+	err = ctrl.SetControllerReference(configMapSync, cm, r.Scheme)
+	if err != nil {
+		log.Error(err, "Failure setting ownerReference")
+	}
 	err = r.Create(ctx, cm)
 	if err != nil {
 		log.Error(err, "ConfigMap couldn't be created")
+		// // First Set Owner reference
+		// log.Info("Attempting to set ownerReference")
+		// err := ctrl.SetControllerReference(configMapSync.ObjectMeta, cm, r.Scheme)
+		// if err != nil {
+		// 	log.Error(err, "Failure setting ownerReference")
+		// }
+
 		// maybe it already exists so lets try to update an existing one
 		log.Info("Attempting to r.Update() existing ConfigMap...")
-		err := r.Update(ctx, cm) // works! Will reconcile!!!
+		err = r.Update(ctx, cm)
 		if err != nil {
 			log.Error(err, "r.Update(ctx, cm) failed", err)
 		}
