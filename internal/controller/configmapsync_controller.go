@@ -57,9 +57,10 @@ type ConfigMapSyncReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx).WithName("Reconcile") // prepends name to log lines
+	logv1 := log.V(1)
 
 	if log.Enabled() {
-		log.Info("Reconcile invoked with Request: " + req.String())
+		logv1.Info("Reconcile invoked with Request: " + req.String())
 	}
 
 	// First lookup Watched ConfigMapSync
@@ -75,7 +76,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Error(err, "Failed Getting configMapSync")
 		return ctrl.Result{}, err
 	}
-	log.Info("ConfigMapSync testNum:" + string(configMapSync.Spec.TestNum))
+	logv1.Info("ConfigMapSync testNum:" + string(configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
 	cm := r.createConfigMapTest(ctx, &configMapSync)
@@ -147,7 +148,8 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) *v1.ConfigMap {
 	log := log.FromContext(ctx).WithName("createConfigMapTest")
-	log.Info("Entered")
+	log.V(2).Info("Entered")
+
 	configMapSync = configMapSync.DeepCopy()
 	testNum := configMapSync.Spec.TestNum
 	testNumString := fmt.Sprintf("%d", testNum)
