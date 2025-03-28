@@ -42,6 +42,9 @@ type ConfigMapSyncStatus struct {
 
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+	// +operator-sdk:csv:customresourcedefinitions:type=status
+	Test string `json:"test,omitempty"`
 }
 
 // +kubebuilder:object:root=true

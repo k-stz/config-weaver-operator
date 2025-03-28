@@ -27,6 +27,7 @@ rules:
   resources:
   - configmapsyncs/status
   verbs:
+  - create
   - get
   - patch
   - update

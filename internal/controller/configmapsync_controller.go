@@ -40,7 +40,7 @@ type ConfigMapSyncReconciler struct {
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs/status,verbs=get;update;patch;create
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -64,8 +64,13 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// First lookup Watched ConfigMapSync
 	// We need a pointer so r.Get() can write the object to it
-	configMapSync := &v1alpha1.ConfigMapSync{}
-	err := r.Get(ctx, req.NamespacedName, configMapSync)
+	configMapSync := v1alpha1.ConfigMapSync{}
+	// TODO: Important, apparently reading the object from Get
+	// reads it from the controller-runtime cache NOT from the K8s API
+	// This cache might be shared by multiple instances of reconcilation
+	// that's why you shouldn't modify the object directly but first
+	// create a DeepCopy of it
+	err := r.Get(ctx, req.NamespacedName, &configMapSync)
 	if err != nil {
 		log.Error(err, "Failed Getting configMapSync")
 		return ctrl.Result{}, err
@@ -73,12 +78,12 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.Info("ConfigMapSync testNum:" + string(configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
-	cm := r.createConfigMapTest(ctx, configMapSync)
+	cm := r.createConfigMapTest(ctx, &configMapSync)
 	log.Info("Creating ConfigMap", cm.Name, cm.Namespace)
 
 	// First Set Owner reference
 	log.Info("Attempting to set ownerReference")
-	err = ctrl.SetControllerReference(configMapSync, cm, r.Scheme)
+	err = ctrl.SetControllerReference(&configMapSync, cm, r.Scheme)
 	if err != nil {
 		log.Error(err, "Failure setting ownerReference")
 	}
@@ -101,6 +106,37 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Info("ConfigMap " + cm.Name + " Updated.")
 	}
 
+	// condition := metav1.Condition{
+	// 	Type:               "Synced",
+	// 	Status:             metav1.ConditionStatus("True"),
+	// 	ObservedGeneration: 0,                          // TODO implement ObervedGeneration in metadata.generation
+	// 	LastTransitionTime: metav1.NewTime(time.Now()), // TODO set correctly
+	// 	Reason:             "ConfigMapCreated" + cm.Name,
+	// 	Message:            "details about transition go here",
+	// }
+	// Does changing the status field cause a watch event on the main resource? Probably not
+	log.Info("Conditions Before append" + fmt.Sprint(configMapSync.Status.Conditions))
+
+	configMapSyncCopy := configMapSync.DeepCopy()
+	//configMapSyncCopy.Status.Conditions = append(configMapSync.Status.Conditions, condition)
+	configMapSyncCopy.Status.Test = "Testing Here!"
+
+	log.Info("Conditions After append" + fmt.Sprint(configMapSync.Status.Conditions))
+
+	// Update status
+	log.Info("Caling r.Update(ctx, configMapSync) ...")
+
+	// .status should be able to be reconstituted from the state of the world
+	// so it's not a good idea to read from the status of the root object. Instead
+	// you should reconstruct it every run
+
+	//err = r.Update(ctx, configMapSync)
+	err = r.Status().Update(ctx, configMapSyncCopy)
+	if err != nil {
+		log.Error(err, "Failed UPdating .status of configMapSyncCopy")
+	}
+	log.Info("Conditions in controller process:" + fmt.Sprint(configMapSyncCopy.Status.Conditions))
+
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
 
@@ -112,6 +148,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) *v1.ConfigMap {
 	log := log.FromContext(ctx).WithName("createConfigMapTest")
 	log.Info("Entered")
+	configMapSync = configMapSync.DeepCopy()
 	testNum := configMapSync.Spec.TestNum
 	testNumString := fmt.Sprintf("%d", testNum)
 
