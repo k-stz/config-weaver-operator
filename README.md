@@ -1,8 +1,41 @@
 # config-weaver-operator
 The `config-weaver-operator` simplifies configuration management by automatically syncing ConfigMaps and Secrets across namespaces. Whether you need to distribute a `PullSecrets`, `CA` certificates, Trust Bundles, or other shared resources, this operator ensures consistency and reliability.
 
+## Goals
+- [ ] Generate ConfigMaps accross namespaces
+- [ ] Ensure ConfigMaps are kept in sync on change
+- [ ] Ensure endless reconcile loops don't occur on .spec.conditions append
+- [ ] Ensure .Status is rebuild on each reconcilation when needed
+- [ ] Implement ObservedGeneration
+- [ ] Implement timebased reconcilation trigger for robustness (when missed event "edges" in the signalig due to for example network partition or noisy neighbor)
+- [ ] implement ownership and cascading deletion: deleting ConfigMapSync deletes all configmaps
+- [ ] .Status: imlement tracking significant state transitions with .status.Conditions
+- [ ] Log levels: ensure logs for state transitions use verbosity level also matches the details level. For example r.Update() should be logged at low verbosity but entering a function at high verbosity
+- [ ] Inspect when DeepCopy() is necessary: For example when concurrent Reconciliation take place and concurrent process A executes an r.Get() fetching the object state from the K8s API and then an r.Updates() does it get written to a cache shared between other concurrent goroutines? Such that if process B executes an r.Get() does it feath instead process A's altered memory from the cache, leading to an unintendet state?
+- [ ] Testing: Inspect testing framework capability and implement some tests for the controller, derive goals from that
+
+Deployment:
+- [ ] Deploy in cluster pod
+- [ ] setup/install OLM (operator lifecycle manager) on dev k8s cluster (k3d, minikube, kind etc)
+- [ ] Deploy as olm operator bundle
+
+Security:
+- [ ] Multitenancy: Can the operator be namespaced and run only in a subset of namespaces. Such that differnt users in the same cluster can't tamper with each otherss namespaces and configmaps?
+
+Metrics
+- [ ] What metrics are available by default
+- [ ] How can they be scraped
+- [ ] What additional metrics can be exposed? Best practice?
+
+Other Features:
+- [ ] Analyze how the concept of Informers and workqueues impact Operator development. Is it just a performance feature?
+- [ ] WebhookServer: Inspect usecases in operator development
+- [ ] Leader Election: How can it be added to the manager setup, what pros and cons does it provide (complexity increase?). Does it increase complexity of the reconciliation logic and how does it relate the controller setup option `MaxConcurrentReconciles`
+
+
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
+
 
 ## Getting Started
 
