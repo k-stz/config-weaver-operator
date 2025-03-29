@@ -76,11 +76,11 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Error(err, "Failed Getting configMapSync")
 		return ctrl.Result{}, err
 	}
-	logv1.Info("ConfigMapSync testNum:" + string(configMapSync.Spec.TestNum))
+	logv1.Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
 	cm := r.createConfigMapTest(ctx, &configMapSync)
-	log.Info("Creating ConfigMap", cm.Name, cm.Namespace)
+	log.Info("Creating ConfigMap " + cm.Name + " " + cm.Namespace)
 
 	// First Set Owner reference
 	log.Info("Attempting to set ownerReference")
