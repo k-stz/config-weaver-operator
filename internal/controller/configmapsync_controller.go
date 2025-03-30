@@ -35,9 +35,9 @@ import (
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
 type ConfigMapSyncReconciler struct {
-	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	client.Client // from manager
+	Scheme        *runtime.Scheme
+	Recorder      record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
@@ -58,21 +58,16 @@ type ConfigMapSyncReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx).WithName("Reconcile") // prepends name to log lines
-	logv1 := log.V(1)
-
 	if log.Enabled() {
-		logv1.Info("Reconcile invoked with Request: " + req.String())
+		log.V(1).Info("Reconcile invoked with Request: " + req.String())
 	}
-
-	// First lookup Watched ConfigMapSync
-	// We need a pointer so r.Get() can write the object to it
-	configMapSync := v1alpha1.ConfigMapSync{}
 	// TODO: Important, apparently reading the object from Get
 	// reads it from the controller-runtime cache NOT from the K8s API
 	// This cache might be shared by multiple instances of reconcilation
 	// that's why you shouldn't modify the object directly but first
 	// create a DeepCopy of it
 	var cmsFound bool = true
+	configMapSync := v1alpha1.ConfigMapSync{}
 	if err := r.Get(ctx, req.NamespacedName, &configMapSync); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to get configMapSync")
@@ -80,39 +75,14 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		cmsFound = false
 	}
+	// if not found, then we have a deletion
 	if cmsFound {
 		log.V(1).Info("found configMapSync in " + req.String())
 	}
-	logv1.Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
+	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
-	cm := r.createConfigMapTest(ctx, &configMapSync)
-	log.Info("Creating ConfigMap " + cm.Name + " " + cm.Namespace)
-
-	// First Set Owner reference
-	log.Info("Attempting to set ownerReference")
-	err := ctrl.SetControllerReference(&configMapSync, cm, r.Scheme)
-	if err != nil {
-		log.Error(err, "Failure setting ownerReference")
-	}
-	err = r.Create(ctx, cm)
-	if err != nil {
-		log.Error(err, "ConfigMap couldn't be created")
-		// // First Set Owner reference
-		// log.Info("Attempting to set ownerReference")
-		// err := ctrl.SetControllerReference(configMapSync.ObjectMeta, cm, r.Scheme)
-		// if err != nil {
-		// 	log.Error(err, "Failure setting ownerReference")
-		// }
-
-		// maybe it already exists so lets try to update an existing one
-		log.Info("Attempting to r.Update() existing ConfigMap...")
-		err = r.Update(ctx, cm)
-		if err != nil {
-			log.Error(err, "r.Update(ctx, cm) failed")
-		}
-		log.Info("ConfigMap " + cm.Name + " Updated.")
-	}
+	_ = r.createConfigMapTest(ctx, &configMapSync, req)
 
 	// condition := metav1.Condition{
 	// 	Type:               "Synced",
@@ -138,8 +108,8 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// so it's not a good idea to read from the status of the root object. Instead
 	// you should reconstruct it every run
 
-	//err = r.Update(ctx, configMapSync)
-	err = r.Status().Update(ctx, configMapSyncCopy)
+	// Update Status
+	err := r.Status().Update(ctx, configMapSyncCopy)
 	if err != nil {
 		log.Error(err, "Failed UPdating .status of configMapSyncCopy")
 	}
@@ -153,7 +123,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) *v1.ConfigMap {
+func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync, req ctrl.Request) *v1.ConfigMap {
 	log := log.FromContext(ctx).WithName("createConfigMapTest")
 	log.V(2).Info("Entered")
 
@@ -172,7 +142,39 @@ func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, confi
 		},
 	}
 
-	// Set Owner Reference!
+	log.Info("Creating ConfigMap " + cm.Name + " " + cm.Namespace)
+	// First check if ConfigMap already exists
+	// In the Namespace that triggered this reconcile
+	if err := r.Get(ctx, req.NamespacedName, cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Create(ctx, cm)
+		}
+	}
+
+	// Set Owner reference
+	log.Info("Attempting to set ownerReference")
+	err := ctrl.SetControllerReference(configMapSync, cm, r.Scheme)
+	if err != nil {
+		log.Error(err, "Failure setting ownerReference")
+	}
+
+	if err := r.Update(ctx, cm); err != nil {
+		log.Error(err, "failed Updating configmap")
+		// // First Set Owner reference
+		// log.Info("Attempting to set ownerReference")
+		// err := ctrl.SetControllerReference(configMapSync.ObjectMeta, cm, r.Scheme)
+		// if err != nil {
+		// 	log.Error(err, "Failure setting ownerReference")
+		// }
+
+		// maybe it already exists so lets try to update an existing one
+		log.Info("Attempting to r.Update() existing ConfigMap...")
+		err = r.Update(ctx, cm)
+		if err != nil {
+			log.Error(err, "r.Update(ctx, cm) failed")
+		}
+		log.Info("ConfigMap " + cm.Name + " Updated.")
+	}
 	return cm
 }
 
