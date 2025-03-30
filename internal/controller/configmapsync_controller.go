@@ -23,6 +23,7 @@ import (
 	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -71,10 +72,16 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// This cache might be shared by multiple instances of reconcilation
 	// that's why you shouldn't modify the object directly but first
 	// create a DeepCopy of it
-	err := r.Get(ctx, req.NamespacedName, &configMapSync)
-	if err != nil {
-		log.Error(err, "Failed Getting configMapSync")
-		return ctrl.Result{}, err
+	var cmsFound bool = true
+	if err := r.Get(ctx, req.NamespacedName, &configMapSync); err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "unable to get configMapSync")
+			return ctrl.Result{}, err
+		}
+		cmsFound = false
+	}
+	if cmsFound {
+		log.V(1).Info("found configMapSync in " + req.String())
 	}
 	logv1.Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
@@ -84,7 +91,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// First Set Owner reference
 	log.Info("Attempting to set ownerReference")
-	err = ctrl.SetControllerReference(&configMapSync, cm, r.Scheme)
+	err := ctrl.SetControllerReference(&configMapSync, cm, r.Scheme)
 	if err != nil {
 		log.Error(err, "Failure setting ownerReference")
 	}
@@ -102,7 +109,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Info("Attempting to r.Update() existing ConfigMap...")
 		err = r.Update(ctx, cm)
 		if err != nil {
-			log.Error(err, "r.Update(ctx, cm) failed", err)
+			log.Error(err, "r.Update(ctx, cm) failed")
 		}
 		log.Info("ConfigMap " + cm.Name + " Updated.")
 	}
