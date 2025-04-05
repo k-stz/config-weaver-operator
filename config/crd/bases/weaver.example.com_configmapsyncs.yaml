@@ -46,6 +46,10 @@ spec:
             properties:
               sourceNamespace:
                 type: string
+              syncToNamespaces:
+                items:
+                  type: string
+                type: array
               testNum:
                 description: This comment will be used as the description of the field!
                 format: int32

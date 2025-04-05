@@ -32,7 +32,8 @@ type ConfigMapSyncSpec struct {
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	TestNum int32 `json:"testNum,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	SourceNamespace string `json:"sourceNamespace,omitempty"`
+	SourceNamespace  string   `json:"sourceNamespace,omitempty"`
+	SyncToNamespaces []string `json:"syncToNamespaces,omitempty"`
 }
 
 // ConfigMapSyncStatus defines the observed state of ConfigMapSync
