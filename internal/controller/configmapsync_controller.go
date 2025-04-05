@@ -84,6 +84,22 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// try to create a configmap
 	_ = r.createConfigMapTest(ctx, &configMapSync, req)
 
+	err := r.updateStatus(ctx, &configMapSync)
+	if err != nil {
+		log.Error(err, "unable to update Status")
+		return ctrl.Result{}, err
+	}
+
+	// No error => stops Reconcile
+	return ctrl.Result{}, nil
+
+	// To reconcile again after X time
+	// thus implementing best practice of
+	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
+	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
 	// condition := metav1.Condition{
 	// 	Type:               "Synced",
 	// 	Status:             metav1.ConditionStatus("True"),
@@ -112,15 +128,11 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err := r.Status().Update(ctx, configMapSyncCopy)
 	if err != nil {
 		log.Error(err, "Failed UPdating .status of configMapSyncCopy")
+		return err
 	}
 	log.Info("Conditions in controller process:" + fmt.Sprint(configMapSyncCopy.Status.Conditions))
 
-	// No error => stops Reconcile
-	return ctrl.Result{}, nil
-
-	// To reconcile again after X time
-	// thus implementing best practice of
-	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	return nil
 }
 
 func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync, req ctrl.Request) *v1.ConfigMap {
