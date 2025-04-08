@@ -152,7 +152,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		cm := &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "createdbymycontroller",
-				Namespace: "default",
+				Namespace: namespace,
 			},
 			//Data["testData"] = "hi",
 			Data: map[string]string{
