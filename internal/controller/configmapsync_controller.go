@@ -82,7 +82,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
-	_ = r.createConfigMapTest(ctx, &configMapSync, req)
+	_ = r.createConfigMaps(ctx, &configMapSync, req)
 
 	err := r.updateStatus(ctx, &configMapSync)
 	if err != nil {
@@ -131,6 +131,75 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSyn
 		return err
 	}
 	log.Info("Conditions in controller process:" + fmt.Sprint(configMapSyncCopy.Status.Conditions))
+
+	return nil
+}
+
+func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync, req ctrl.Request) error {
+	log := log.FromContext(ctx).WithName("createConfigMaps")
+	log.V(2).Info("Entered")
+
+	configMapSync = configMapSync.DeepCopy()
+	nsList := configMapSync.Spec.SyncToNamespaces
+	nsListStr := fmt.Sprintf("%s", nsList)
+	testNumString := fmt.Sprintf("%d", configMapSync.Spec.TestNum)
+
+	log.Info("namespace List: " + nsListStr)
+
+	configMaps := []*v1.ConfigMap{}
+	for _, namespace := range configMapSync.Spec.SyncToNamespaces {
+		fmt.Println("ConfigMap in Namespace ", namespace)
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "createdbymycontroller",
+				Namespace: "default",
+			},
+			//Data["testData"] = "hi",
+			Data: map[string]string{
+				"testNum": testNumString,
+			},
+		}
+		configMaps = append(configMaps, cm)
+		// Set Owner reference
+		// TODO does it suffice here for both initial r.Create() and continuous r.Update() ?
+		log.Info("Attempting to set ownerReference")
+		if err := ctrl.SetControllerReference(configMapSync, cm, r.Scheme); err != nil {
+			log.Error(err, "Failure setting ownerReference")
+		}
+	}
+
+	// Check if configmap alread
+	// In the Namespace that triggered this reconcile
+	log.Info("Iterating over configMaps, one fore each SyncToNamespaces entry")
+	for _, cm := range configMaps {
+		log.Info("Iterating CM for namespace " + cm.Namespace)
+		nsKey := client.ObjectKey{
+			Namespace: cm.Namespace,
+			Name:      cm.Name,
+		}
+		log.Info("First trying to r.Get() with Objectkey: " + nsKey.String())
+
+		// FIXME overwritting cm here...
+		cmCluster := cm.DeepCopy()
+		if err := r.Get(ctx, nsKey, cmCluster); err != nil {
+			log.Info("r.Get() failed; testing IsNotFound... err:")
+			if apierrors.IsNotFound(err) {
+				err := r.Create(ctx, cm)
+				if err != nil {
+					log.Error(err, "failed creating configmap in namespace "+cm.Namespace)
+					return err
+				}
+			}
+		} else {
+			log.Info("r.Get() was a success cmCluster testnum:" + cmCluster.Data["testNum"])
+		}
+		// Get was successful => Exists and can be updated
+		if err := r.Update(ctx, cm); err != nil {
+
+			log.Error(err, "r.Update(ctx, cm) failed")
+		}
+		log.Info("ConfigMap " + cm.Name + " Updated.")
+	}
 
 	return nil
 }
