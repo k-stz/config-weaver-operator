@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
@@ -127,7 +128,7 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSyn
 	// Update Status
 	err := r.Status().Update(ctx, configMapSyncCopy)
 	if err != nil {
-		log.Error(err, "Failed UPdating .status of configMapSyncCopy")
+		log.Error(err, "Failed Updating .status of configMapSyncCopy")
 		return err
 	}
 	log.Info("Conditions in controller process:" + fmt.Sprint(configMapSyncCopy.Status.Conditions))
@@ -137,18 +138,17 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSyn
 
 func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync, req ctrl.Request) error {
 	log := log.FromContext(ctx).WithName("createConfigMaps")
-	log.V(2).Info("Entered")
 
 	configMapSync = configMapSync.DeepCopy()
 	nsList := configMapSync.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
 	testNumString := fmt.Sprintf("%d", configMapSync.Spec.TestNum)
 
-	log.Info("namespace List: " + nsListStr)
+	log.V(2).Info("Entered with SyncToNamespaces" + nsListStr)
 
 	configMaps := []*v1.ConfigMap{}
 	for _, namespace := range configMapSync.Spec.SyncToNamespaces {
-		fmt.Println("ConfigMap in Namespace ", namespace)
+		fmt.Println("Building ConfigMap for Namespace ", namespace)
 		cm := &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "createdbymycontroller",
@@ -162,101 +162,48 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		configMaps = append(configMaps, cm)
 		// Set Owner reference
 		// TODO does it suffice here for both initial r.Create() and continuous r.Update() ?
+		// FIXME won't work for cross-namespace => ConfigMapSync needs to be
+		// not part of a namespace
 		log.Info("Attempting to set ownerReference")
 		if err := ctrl.SetControllerReference(configMapSync, cm, r.Scheme); err != nil {
-			log.Error(err, "Failure setting ownerReference")
+			log.Error(err, "Failure setting ownerReference for cm in ns:"+cm.Namespace)
 		}
 	}
 
 	// Check if configmap alread
 	// In the Namespace that triggered this reconcile
-	log.Info("Iterating over configMaps, one fore each SyncToNamespaces entry")
-	for _, cm := range configMaps {
-		log.Info("Iterating CM for namespace " + cm.Namespace)
+	log.Info("create/update ConfigMaps...")
+	for i, cm := range configMaps {
+		iter := strconv.Itoa(i)
+		log.Info(iter + ". Iteration for ns: " + cm.Namespace)
 		nsKey := client.ObjectKey{
 			Namespace: cm.Namespace,
 			Name:      cm.Name,
 		}
-		log.Info("First trying to r.Get() with Objectkey: " + nsKey.String())
 
-		// FIXME overwritting cm here...
 		cmCluster := cm.DeepCopy()
+		log.Info(iter + ". r.Get() with Objectkey: " + nsKey.String())
 		if err := r.Get(ctx, nsKey, cmCluster); err != nil {
-			log.Info("r.Get() failed; testing IsNotFound... err:")
+			log.Info(iter + ". r.Get() failed; testing if IsNotFound:")
 			if apierrors.IsNotFound(err) {
 				err := r.Create(ctx, cm)
 				if err != nil {
 					log.Error(err, "failed creating configmap in namespace "+cm.Namespace)
 					return err
 				}
+				log.Info(iter + ". ConfigMap IsNotFound => Created.")
+
 			}
 		} else {
-			log.Info("r.Get() was a success cmCluster testnum:" + cmCluster.Data["testNum"])
+			log.Info(iter + ".r.Get() successful, current cluster cm testnum:" + cmCluster.Data["testNum"])
 		}
-		// Get was successful => Exists and can be updated
 		if err := r.Update(ctx, cm); err != nil {
-
-			log.Error(err, "r.Update(ctx, cm) failed")
+			log.Error(err, iter+". r.Update(ctx, cm) failed")
 		}
-		log.Info("ConfigMap " + cm.Name + " Updated.")
+		log.Info(iter + ".ConfigMap " + cm.Name + " Updated. This iteration finished.")
 	}
 
 	return nil
-}
-
-func (r *ConfigMapSyncReconciler) createConfigMapTest(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync, req ctrl.Request) *v1.ConfigMap {
-	log := log.FromContext(ctx).WithName("createConfigMapTest")
-	log.V(2).Info("Entered")
-
-	configMapSync = configMapSync.DeepCopy()
-	testNum := configMapSync.Spec.TestNum
-	testNumString := fmt.Sprintf("%d", testNum)
-
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "createdbymycontroller",
-			Namespace: "default",
-		},
-		//Data["testData"] = "hi",
-		Data: map[string]string{
-			"testNum": testNumString,
-		},
-	}
-
-	log.Info("Creating ConfigMap " + cm.Name + " " + cm.Namespace)
-	// First check if ConfigMap already exists
-	// In the Namespace that triggered this reconcile
-	if err := r.Get(ctx, req.NamespacedName, cm); err != nil {
-		if apierrors.IsNotFound(err) {
-			r.Create(ctx, cm)
-		}
-	}
-
-	// Set Owner reference
-	log.Info("Attempting to set ownerReference")
-	err := ctrl.SetControllerReference(configMapSync, cm, r.Scheme)
-	if err != nil {
-		log.Error(err, "Failure setting ownerReference")
-	}
-
-	if err := r.Update(ctx, cm); err != nil {
-		log.Error(err, "failed Updating configmap")
-		// // First Set Owner reference
-		// log.Info("Attempting to set ownerReference")
-		// err := ctrl.SetControllerReference(configMapSync.ObjectMeta, cm, r.Scheme)
-		// if err != nil {
-		// 	log.Error(err, "Failure setting ownerReference")
-		// }
-
-		// maybe it already exists so lets try to update an existing one
-		log.Info("Attempting to r.Update() existing ConfigMap...")
-		err = r.Update(ctx, cm)
-		if err != nil {
-			log.Error(err, "r.Update(ctx, cm) failed")
-		}
-		log.Info("ConfigMap " + cm.Name + " Updated.")
-	}
-	return cm
 }
 
 // SetupWithManager sets up the controller with the Manager.
