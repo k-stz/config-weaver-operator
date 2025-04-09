@@ -22,6 +22,7 @@ Deployment:
 Security:
 - [ ] Multitenancy: Can the operator be namespaced and run only in a subset of namespaces. Such that differnt users in the same cluster can't tamper with each otherss namespaces and configmaps?
 
+
 Metrics
 - [ ] What metrics are available by default
 - [ ] How can they be scraped
@@ -31,6 +32,22 @@ Other Features:
 - [ ] Analyze how the concept of Informers and workqueues impact Operator development. Is it just a performance feature?
 - [ ] WebhookServer: Inspect usecases in operator development
 - [ ] Leader Election: How can it be added to the manager setup, what pros and cons does it provide (complexity increase?). Does it increase complexity of the reconciliation logic and how does it relate the controller setup option `MaxConcurrentReconciles`
+
+
+## Design Problems with Multitenancy
+We need:
+- A custom resource (e.g. ConfigMapSync) that lets a user define "sync this ConfigMap from nsA to nsB, nsC, etc". The operator (controller) to do the actual syncing.
+- Multitenancy: users should only be able to sync between namespaces they have access to (e.g. RBAC allows them to create/update ConfigMaps in those namespaces).
+- The operator runs with elevated permissions (as most do) but should act only on behalf of the requesting user, within their access scope.
+
+The Challange:
+Kubernetes controllers run as cluster components with service accounts that usually have broad access. So by default, your operator can sync ConfigMaps regardless of who created the ConfigMapSync object. That’s the problem. 
+
+Approach:
+Query the users permission on creation of object and embed it declaratively in the ConfigMapSync field? Then from then only those namespaces are syncable...? 
+
+
+
 
 
 ## Description
