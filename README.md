@@ -34,8 +34,8 @@ Other Features:
 - [ ] Leader Election: How can it be added to the manager setup, what pros and cons does it provide (complexity increase?). Does it increase complexity of the reconciliation logic and how does it relate the controller setup option `MaxConcurrentReconciles`
 
 
-## Multitenancy Design 
-### Problem / Challange
+## Design Notes
+### Multitenancy Design: Problem / Challenge
 We need:
 - A custom resource (e.g. ConfigMapSync) that lets a user define "sync this ConfigMap from nsA to nsB, nsC, etc". The operator (controller) to do the actual syncing.
 - Multitenancy: users should only be able to sync between namespaces they have access to (e.g. RBAC allows them to create/update ConfigMaps in those namespaces).

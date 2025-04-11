@@ -159,6 +159,9 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 				"testNum": testNumString,
 			},
 		}
+		if err := r.setOwnerRef(ctx, configMapSync, cm); err != nil {
+			log.Error(err, "Failed setting OwnerRef")
+		}
 		configMaps = append(configMaps, cm)
 	}
 
@@ -218,6 +221,8 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&weaverv1alpha1.ConfigMapSync{}).
 		// Watch the ConfigMap managed by the ConfigMapSync controller , also
 		// triggereing reconciliation
+		// Ah this only works when an ownerReference is set for the configmap! Only then the
+		// watch gets triggered
 		Owns(&v1.ConfigMap{}).
 		// You can set many more options here, for example the number
 		// of concurrent reconciles (default is one) with:
