@@ -83,7 +83,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
-	_ = r.createConfigMaps(ctx, &configMapSync, req)
+	_ = r.createConfigMaps(ctx, &configMapSync)
 
 	err := r.updateStatus(ctx, &configMapSync)
 	if err != nil {
@@ -136,7 +136,7 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSyn
 	return nil
 }
 
-func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync, req ctrl.Request) error {
+func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("createConfigMaps")
 
 	configMapSync = configMapSync.DeepCopy()
@@ -160,19 +160,11 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 			},
 		}
 		configMaps = append(configMaps, cm)
-		// Set Owner reference
-		// TODO does it suffice here for both initial r.Create() and continuous r.Update() ?
-		// FIXME won't work for cross-namespace => ConfigMapSync needs to be
-		// not part of a namespace
-		log.Info("Attempting to set ownerReference")
-		if err := ctrl.SetControllerReference(configMapSync, cm, r.Scheme); err != nil {
-			log.Error(err, "Failure setting ownerReference for cm in ns:"+cm.Namespace)
-		}
 	}
 
 	// Check if configmap alread
 	// In the Namespace that triggered this reconcile
-	log.Info("create/update ConfigMaps...")
+	log.V(1).Info("create/update ConfigMaps...")
 	for i, cm := range configMaps {
 		iter := strconv.Itoa(i)
 		log.Info(iter + ". Iteration for ns: " + cm.Namespace)
@@ -182,7 +174,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		}
 
 		cmCluster := cm.DeepCopy()
-		log.Info(iter + ". r.Get() with Objectkey: " + nsKey.String())
+		log.V(1).Info(iter + ". r.Get() with Objectkey: " + nsKey.String())
 		if err := r.Get(ctx, nsKey, cmCluster); err != nil {
 			log.Info(iter + ". r.Get() failed; testing if IsNotFound:")
 			if apierrors.IsNotFound(err) {
@@ -203,6 +195,18 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		log.Info(iter + ".ConfigMap " + cm.Name + " Updated. This iteration finished.")
 	}
 
+	return nil
+}
+
+// Deciding against setting owner reference, as the ConifgMapSync will be namespaced for
+// easier Multitenancy implementaiton. Instead, if a cross-namespace GC is needed, it can
+// be implemented by the controller by using a magic label that all synced namespaces can share
+func (r *ConfigMapSyncReconciler) setOwnerRef(ctx context.Context, owner *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) error {
+	//	log := log.FromContext(ctx).WithName("setOwnerRef")
+
+	if err := ctrl.SetControllerReference(owner, cm, r.Scheme); err != nil {
+		return err
+	}
 	return nil
 }
 
