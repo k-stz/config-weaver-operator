@@ -170,3 +170,20 @@ kubectl delete configmapsyncs.weaver.example.com configmapsync-sample --cascade=
 # In this case the --cascade=orphan must use an equal sign for the option!
 kubectl delete configmapsyncs.weaver.example.com configmapsync-sample --cascade orphan
 ```
+
+# Switching CRD from namespaced to clusterscoped
+For an easier initial implementaiton ConfigMapSync will be switched from namespaced to cluster scope. This is achieved by simple setting the codemarker `+kubebuilder:resource:scope=Cluster` above the API type definition and run `make manifests`. To combine it with shortnaming, you need to write it in one:
+`// +kubebuilder:resource:scope=Cluster,path=configmapsyncs,shortName=cms;cmsync`
+Else when you write it in separate lines, only one entry will be considered
+
+But after you apply the new CRD to the cluster, what happens to existing namespaced `ConfigMapSync` object in the cluster? The apply will protest! See:
+```sh
+$ make install
+/home/k-stz/code/config-weaver-operator/bin/controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+/home/k-stz/code/config-weaver-operator/bin/kustomize build config/crd | kubectl apply -f -
+The CustomResourceDefinition "configmapsyncs.weaver.example.com" is invalid: spec.scope: Invalid value: "Cluster": field is immutable
+make: *** [Makefile:182: install] Error 1
+```
+
+So we need to delete the old CRD, thereby removing all its CR and thus solving thus conflict.
+

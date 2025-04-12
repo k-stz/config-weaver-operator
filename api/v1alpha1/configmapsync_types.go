@@ -49,9 +49,9 @@ type ConfigMapSyncStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=configmapsyncs,shortName=cms;cmsync
-// enables the "/status" subresource on a CRD.
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster,path=configmapsyncs,shortName=cms;cmsync
+// enables the "/status" subresource on a CRD.
 // ConfigMapSync is the Schema for the configmapsyncs API
 type ConfigMapSync struct {
 	metav1.TypeMeta   `json:",inline"`

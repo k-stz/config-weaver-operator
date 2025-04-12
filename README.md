@@ -2,7 +2,7 @@
 The `config-weaver-operator` simplifies configuration management by automatically syncing ConfigMaps and Secrets across namespaces. Whether you need to distribute a `PullSecrets`, `CA` certificates, Trust Bundles, or other shared resources, this operator ensures consistency and reliability.
 
 ## Goals
-- [ ] Generate ConfigMaps accross namespaces
+- [ ] Generate ConfigMaps accross namespaces, use cluster-scoped CR for easier implementation 
 - [ ] Ensure ConfigMaps are kept in sync on change
 - [ ] Ensure endless reconcile loops don't occur on .spec.conditions append
 - [ ] Ensure .Status is rebuild on each reconcilation when needed
@@ -87,6 +87,21 @@ Impersonation vs Token Use Tradeoffs
   - Cleaner and easier to audit
 
 => TODO: review the TokenRequest solution
+
+#### Complication: ownerReference for namespaced Ressource 
+To easy a multitenant implementation, namespaced CR (`ConfigMapSync`) is preferred. But the created ConfigMaps can't then set the ownerReference, as this is forbidden to point to a namespaced owner.
+What do we need the ownerReference for:
+- easy GC: when deleting CR all childs dependents will also be deletd
+- easy dependent watch: the controller-runtime framework has a convenient watch implementation for owned objects. Now that it's missing, we'd need to implement a mechanism to watch changes on all the ConfigMaps and figure out the namespaced `ConifgMapSync`` that owns them.
+
+Possible Solutions:
+- Index + Watch with "Predicate Filters": 
+  - The configmaps will be labeld with a owner-namespace and owner-name.
+  - The ConfigMapSync CRs can be indexed! See "mgr.GetFieldIndexer"...
+  - watch ConfigMaps with a custom event handler, instead of .Owns() use .Watches()... effectively triggereing the reconciliation handler for hte ConfigMapSync controller whenever a ConfigMap is updated with the labels set!
+  - finalizers: to get GC back in, we can implement logic on the /finalizer subresource!
+
+
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
