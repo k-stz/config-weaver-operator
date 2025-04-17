@@ -187,3 +187,81 @@ make: *** [Makefile:182: install] Error 1
 
 So we need to delete the old CRD, thereby removing all its CR and thus solving thus conflict.
 
+# Design Notes
+## Multitenancy Design: Problem / Challenge
+We need:
+- A custom resource (e.g. ConfigMapSync) that lets a user define "sync this ConfigMap from nsA to nsB, nsC, etc". The operator (controller) to do the actual syncing.
+- Multitenancy: users should only be able to sync between namespaces they have access to (e.g. RBAC allows them to create/update ConfigMaps in those namespaces).
+- The operator runs with elevated permissions (as most do) but should act only on behalf of the requesting user, within their access scope.
+
+The Challange:
+Kubernetes controllers run as cluster components with service accounts that usually have broad access. So by default, your operator can sync ConfigMaps regardless of who created the ConfigMapSync object. That’s the problem. 
+
+Approach:
+Query the users permission on creation of object and embed it declaratively in the ConfigMapSync field? Then from then only those namespaces are syncable...? 
+
+### Solution Proposal
+Inspired by the openshift logging operator which for the ressource `ClusterLogForwarder` demands that you supply a serviceaccount via which rights logs are scraped/forwarded we can do the same.
+
+The idea is to:
+1. in the ConfigMapSync CR will be namespaced
+2. It includes a ServiceAccount field where the user may only reference an SA in the same namespace
+3. The operators:
+ - reads the CR
+ - uses the provided SA to impersonate or use its token
+ - uses that identity to perform the actual syncing (e.g., create/update ConfigMaps in target namespace)
+ 4. Thus the ability to sync is bound by the RBAC rules attached to that SA, not the operator's own prvileges
+ 
+### Evaluation of Solution
+
+### Pros
+- **multitenancy safe**: the operator is just a "conduit" and enforces actions only within the boudns of what the user's `ServiceAccount` is allowed to do!
+- **RBAC-native**: Admins already know how to mange RBAC roles - we're reusing a familiar permission model
+- **Namespace-isolated**: users can't smuggle in another namespace'S SA (will disallow referencing one from another namespace)
+- **Scalable**: don't need to issue SARs for every action (less API traffic and conde complexity)
+
+### Caveates / Refinements**:
+Token Mounting:
+- Token Mounting and Access: After accessing the token for that SA operators can create a token for the SA using  `TokenRequest API`
+- Operator RBAC update: this requires the fllowing permissions
+``` yaml
+apiGroups: ["authentication.k8s.io"]
+resources: ["serviceaccounts/token"]
+verbs: ["create"]
+```
+- token should be short-lived and scoped to a minimal audience
+
+Impersonation vs Token Use Tradeoffs
+- 🔄 Impersonation:
+  - You impersonate the user or SA by adding headers (Impersonate-User, Impersonate-Group)	Requires impersonate RBAC permission 
+  - powerful and risky if misconfigured
+- 🔑 TokenRequest (recommended): 
+  - You get an actual token and create a new REST client with it	
+  - Cleaner and easier to audit
+
+=> TODO: review the TokenRequest solution
+
+### Complication: ownerReference for namespaced Ressource 
+To easy a multitenant implementation, namespaced CR (`ConfigMapSync`) is preferred. But the created ConfigMaps can't then set the ownerReference, as this is forbidden to point to a namespaced owner.
+What do we need the ownerReference for:
+- easy GC: when deleting CR all childs dependents will also be deletd
+- easy dependent watch: the controller-runtime framework has a convenient watch implementation for owned objects. Now that it's missing, we'd need to implement a mechanism to watch changes on all the ConfigMaps and figure out the namespaced `ConifgMapSync`` that owns them.
+
+Possible Solutions:
+- Index + Watch with "Predicate Filters": 
+  - The configmaps will be labeld with a owner-namespace and owner-name.
+  - The ConfigMapSync CRs can be indexed! See "mgr.GetFieldIndexer"...
+  - watch ConfigMaps with a custom event handler, instead of .Owns() use .Watches()... effectively triggereing the reconciliation handler for hte ConfigMapSync controller whenever a ConfigMap is updated with the labels set!
+  - finalizers: to get GC back in, we can implement logic on the /finalizer subresource!
+
+
+
+
+## ConfigMapSync: Conditations
+in `.status.conditions` a slice of metav1.Condition is stored.
+``` go
+//	    // Known .status.conditions.type are: "Available", "Progressing", and "Degraded"
+```
+Conditions are an often-used pattern to include them in the status of CRs. A `Condition` represetns the latest available observations of an object's state. They are a convention as per the sig-architecture "api-conventions.yaml" https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+
+"They allow tools and **other controllers** to collect summary informations about resources without needing to understand resource-specific status details". For example the `kubectl wait` subcommand can block till a specific condition is met, e.g. `kubectl wait --for=condition=Ready pod/busybox1`

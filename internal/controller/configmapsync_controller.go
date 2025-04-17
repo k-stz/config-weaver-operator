@@ -101,6 +101,10 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
+
+	//TODO use SetStatusCondition!
+	// 	meta.SetStatusCondition(conditions *[]metav1.Condition, newCondition metav1.Condition)
+
 	// condition := metav1.Condition{
 	// 	Type:               "Synced",
 	// 	Status:             metav1.ConditionStatus("True"),
