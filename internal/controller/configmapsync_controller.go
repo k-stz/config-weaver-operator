@@ -25,6 +25,7 @@ import (
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -99,43 +100,32 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
+func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
 
 	//TODO use SetStatusCondition!
-	// 	meta.SetStatusCondition(conditions *[]metav1.Condition, newCondition metav1.Condition)
+	cmsCopy := cms.DeepCopy()
+	newCondition := metav1.Condition{
+		Type:               "Synced",
+		Status:             metav1.ConditionStatus("True"),
+		ObservedGeneration: 0, // TODO implement ObervedGeneration in metadata.generation
+		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
+		Reason:  "SourceConfigMapSynced",
+		Message: "Source ConfigMap synced from namespace " + cmsCopy.Spec.SourceNamespace,
+	}
 
-	// condition := metav1.Condition{
-	// 	Type:               "Synced",
-	// 	Status:             metav1.ConditionStatus("True"),
-	// 	ObservedGeneration: 0,                          // TODO implement ObervedGeneration in metadata.generation
-	// 	LastTransitionTime: metav1.NewTime(time.Now()), // TODO set correctly
-	// 	Reason:             "ConfigMapCreated" + cm.Name,
-	// 	Message:            "details about transition go here",
-	// }
-	// Does changing the status field cause a watch event on the main resource? Probably not
-	log.Info("Conditions Before append" + fmt.Sprint(configMapSync.Status.Conditions))
-
-	configMapSyncCopy := configMapSync.DeepCopy()
-	//configMapSyncCopy.Status.Conditions = append(configMapSync.Status.Conditions, condition)
-	configMapSyncCopy.Status.Test = "Testing Here!"
-
-	log.Info("Conditions After append" + fmt.Sprint(configMapSync.Status.Conditions))
-
-	// Update status
-	log.Info("Caling r.Update(ctx, configMapSync) ...")
+	meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCondition)
 
 	// .status should be able to be reconstituted from the state of the world
 	// so it's not a good idea to read from the status of the root object. Instead
 	// you should reconstruct it every run
 
 	// Update Status
-	err := r.Status().Update(ctx, configMapSyncCopy)
+	err := r.Status().Update(ctx, cmsCopy)
 	if err != nil {
-		log.Error(err, "Failed Updating .status of configMapSyncCopy")
+		log.Error(err, "Failed Updating .status of ConfigMapSync DeepCopy")
 		return err
 	}
-	log.Info("Conditions in controller process:" + fmt.Sprint(configMapSyncCopy.Status.Conditions))
 
 	return nil
 }
