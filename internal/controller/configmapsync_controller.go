@@ -35,11 +35,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// Represents staet of a single reconciliation run
+// used to regenerate fresh status for ConfigMapSync.status
+type RunState struct {
+	cmsDeleted           bool // Set to true, when r.Get() returns nil!
+	sourceConfigMapFound bool
+	allSynced            bool
+}
+
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
 type ConfigMapSyncReconciler struct {
 	client.Client // from manager
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
+	RunState      RunState
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
@@ -81,12 +90,13 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if cmsFound {
 		log.V(1).Info("found configMapSync in " + req.String())
 	}
+
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
 	_ = r.createConfigMaps(ctx, &configMapSync)
 
-	err := r.updateStatus(ctx, &configMapSync)
+	err := r.updateSyncedStatus(ctx, &configMapSync)
 	if err != nil {
 		log.Error(err, "unable to update Status")
 		return ctrl.Result{}, err
@@ -100,22 +110,25 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
-
-	//TODO use SetStatusCondition!
-	cmsCopy := cms.DeepCopy()
+func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+	// TODO set it accodring to state that is tracked in ConfigMapSyncReconciler, for now hardcoded
 	newCondition := metav1.Condition{
 		Type:               "Synced",
 		Status:             metav1.ConditionStatus("True"),
 		ObservedGeneration: 0, // TODO implement ObervedGeneration in metadata.generation
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
 		Reason:  "SourceConfigMapSynced",
-		Message: "Source ConfigMap synced from namespace " + cmsCopy.Spec.SourceNamespace,
+		Message: "Source ConfigMap synced from namespace " + cms.Spec.SourceNamespace,
 	}
+	return r.updateStatus(ctx, newCondition, cms)
+}
 
+func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, newCondition metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
+	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
+
+	//TODO use SetStatusCondition!
+	cmsCopy := cms.DeepCopy()
 	meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCondition)
-
 	// .status should be able to be reconstituted from the state of the world
 	// so it's not a good idea to read from the status of the root object. Instead
 	// you should reconstruct it every run
