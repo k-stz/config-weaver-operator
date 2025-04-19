@@ -44,9 +44,18 @@ spec:
           spec:
             description: ConfigMapSyncSpec defines the desired state of ConfigMapSync
             properties:
+              source:
+                description: Name of ConfigMap and its namespace that should be synced
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                type: object
               sourceNamespace:
                 type: string
               syncToNamespaces:
+                description: Lis of namespaces to sync Source Namespace to
                 items:
                   type: string
                 type: array

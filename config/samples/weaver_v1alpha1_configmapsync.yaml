@@ -7,5 +7,17 @@ metadata:
   name: configmapsync-sample
 spec:
   testNum: 42
+  source:
+    name: sync-me-cm
+    namespace: default
   syncToNamespaces:
-  - default
+  - foo
+---
+# Source ConfigMap
+apiVersion: v1
+data:
+  key1: hello
+kind: ConfigMap
+metadata:
+  name: sync-me-cm
+  namespace: default

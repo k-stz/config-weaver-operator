@@ -32,8 +32,25 @@ type ConfigMapSyncSpec struct {
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	TestNum int32 `json:"testNum,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	SourceNamespace  string   `json:"sourceNamespace,omitempty"`
+	SourceNamespace string `json:"sourceNamespace,omitempty"`
+	// Name of ConfigMap and its namespace that should be synced
+	Source Source `json:"source,omitempty"`
+	// Lis of namespaces to sync Source Namespace to
 	SyncToNamespaces []string `json:"syncToNamespaces,omitempty"`
+
+	// Others
+	// syncOptions.prune: true
+	// syncOptions.forceUpdate: true
+	// Or this is more readable?
+	//   syncOptions:
+	//onUpdate: true        # Optional: whether to sync when the source is updated
+	//onDelete: false
+
+}
+
+type Source struct {
+	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // ConfigMapSyncStatus defines the observed state of ConfigMapSync
