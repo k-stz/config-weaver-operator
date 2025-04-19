@@ -77,7 +77,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// This cache might be shared by multiple instances of reconcilation
 	// that's why you shouldn't modify the object directly but first
 	// create a DeepCopy of it
-	var cmsFound bool = true
+	cmsFound := true
 	configMapSync := v1alpha1.ConfigMapSync{}
 	if err := r.Get(ctx, req.NamespacedName, &configMapSync); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -94,20 +94,34 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
 	// try to create a configmap
-	_ = r.createConfigMaps(ctx, &configMapSync)
-
-	err := r.updateSyncedStatus(ctx, &configMapSync)
-	if err != nil {
-		log.Error(err, "unable to update Status")
+	if err := r.createConfigMaps(ctx, &configMapSync); err != nil {
+		log.Error(err, "unable to create ConfigMaps; Updating status...")
+		r.updateStatus(ctx, &configMapSync)
 		return ctrl.Result{}, err
 	}
 
+	r.updateStatus(ctx, &configMapSync)
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
 
 	// To reconcile again after X time
 	// thus implementing best practice of
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+	log := log.FromContext(ctx).WithName("updateStatus")
+
+	if err := r.updateSyncedStatus(ctx, cms); err != nil {
+		log.Error(err, "unable to update Status")
+		return err
+	}
+
+	if err := r.updateSourceFoundStatus(ctx, cms); err != nil {
+		log.Error(err, "unable to update Status")
+		return err
+	}
+	return nil
 }
 
 func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
@@ -120,10 +134,33 @@ func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v
 		Reason:  "SourceConfigMapSynced",
 		Message: "Source ConfigMap synced from namespace " + cms.Spec.SourceNamespace,
 	}
-	return r.updateStatus(ctx, newCondition, cms)
+	return r.updateStatusWithCondition(ctx, newCondition, cms)
 }
 
-func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, newCondition metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
+func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+	// TODO set it accodring to state that is tracked in ConfigMapSyncReconciler, for now hardcoded
+	log := log.FromContext(ctx).WithName("Reconcile>updateSourceFoundStatus")
+
+	newCondition := metav1.Condition{
+		Type:               "SourceConfigMapFound",
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: 0, // TODO implement ObervedGeneration in metadata.generation
+		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
+		Reason:  "ConfgigMapFound",
+		Message: "Source ConfigMap found in namespace " + cms.Spec.SourceNamespace,
+	}
+	log.Info("RunState is sourceConfigMapFound" + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
+	if !r.RunState.sourceConfigMapFound {
+
+		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
+		newCondition.Reason = "ConfigMapMissing"
+		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.SourceNamespace
+	}
+
+	return r.updateStatusWithCondition(ctx, newCondition, cms)
+}
+
+func (r *ConfigMapSyncReconciler) updateStatusWithCondition(ctx context.Context, newCondition metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
 
 	//TODO use SetStatusCondition!
@@ -149,9 +186,15 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 	configMapSync = configMapSync.DeepCopy()
 	nsList := configMapSync.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
-	testNumString := fmt.Sprintf("%d", configMapSync.Spec.TestNum)
+	//testNumString := fmt.Sprintf("%d", configMapSync.Spec.TestNum)
 
 	log.V(2).Info("Entered with SyncToNamespaces" + nsListStr)
+
+	r.RunState.sourceConfigMapFound = true
+	sourceConfigMap, err := r.getSourceConfigMap(ctx, configMapSync)
+	if err != nil {
+		return err
+	}
 
 	configMaps := []*v1.ConfigMap{}
 	for _, namespace := range configMapSync.Spec.SyncToNamespaces {
@@ -162,9 +205,10 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 				Namespace: namespace,
 			},
 			//Data["testData"] = "hi",
-			Data: map[string]string{
-				"testNum": testNumString,
-			},
+			// Data: map[string]string{
+			// 	"testNum": testNumString,
+			// },
+			Data: sourceConfigMap.Data,
 		}
 		if err := r.setOwnerRef(ctx, configMapSync, cm); err != nil {
 			log.Error(err, "Failed setting OwnerRef")
@@ -172,7 +216,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		configMaps = append(configMaps, cm)
 	}
 
-	// Check if configmap alread
+	// Check if configmap already
 	// In the Namespace that triggered this reconcile
 	log.V(1).Info("create/update ConfigMaps...")
 	for i, cm := range configMaps {
@@ -206,6 +250,19 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 	}
 
 	return nil
+}
+
+func (r *ConfigMapSyncReconciler) getSourceConfigMap(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ConfigMap, error) {
+	cm := &v1.ConfigMap{}
+	nsKey := client.ObjectKey{
+		Namespace: cms.Spec.Source.Namespace,
+		Name:      cms.Spec.Source.Name,
+	}
+	if err := r.Get(ctx, nsKey, cm); err != nil {
+		r.RunState.sourceConfigMapFound = false
+		return cm, err
+	}
+	return cm, nil
 }
 
 // Deciding against setting owner reference, as the ConifgMapSync will be namespaced for
