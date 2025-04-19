@@ -265,3 +265,10 @@ in `.status.conditions` a slice of metav1.Condition is stored.
 Conditions are an often-used pattern to include them in the status of CRs. A `Condition` represetns the latest available observations of an object's state. They are a convention as per the sig-architecture "api-conventions.yaml" https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
 
 "They allow tools and **other controllers** to collect summary informations about resources without needing to understand resource-specific status details". For example the `kubectl wait` subcommand can block till a specific condition is met, e.g. `kubectl wait --for=condition=Ready pod/busybox1`
+
+According to the api-convention Conditions are most useful when they follow some consistent conventions:
+- The meaning of a Condition shouldn't be changed arbitrarity - it becomes part of the API (has same backwards- and forwards-compatibility concerns)
+- controllers should apply their condition to a resource the first time they visit the resource, even if the status is Unknown => this lets lets users and components in system know that condition exists and controller is making progress on reconciling the resource!
+- Should describe the current observed state, rather than curren tstate tranistions. Thus typically use adjective ("Ready", "OutOfDisk") or past-tense verb ("Succeeded", "Failed") rather than a present-tense ver ("Deploying")
+  - The latter, intermediate states, may be indicated by setting the status of the condition to `Unknown`
+  - For state Transitions that take a long time (e.g. more than 1 minute), it is reasonable to treat the trasition itself as an observed state!. In this case a Condition such as "Resizing" itself should not be transient and should instead be signalled using True/False/Unknown pattern.
