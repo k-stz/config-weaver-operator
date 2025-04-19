@@ -180,6 +180,25 @@ func (r *ConfigMapSyncReconciler) updateStatusWithCondition(ctx context.Context,
 	return nil
 }
 
+func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
+	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
+	sourceCM, err := r.getSourceConfigMap(ctx, configMapSync)
+	if err != nil {
+		r.RunState.sourceConfigMapFound = false
+		return nil, err
+	}
+	r.RunState.sourceConfigMapFound = true
+
+	if err := r.setOwnerRef(configMapSync, sourceCM); err != nil {
+		log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
+	}
+
+	if err := r.Update(ctx, sourceCM); err != nil {
+		log.Error(err, "Failed setting OwnerRef on Source ConfigMap")
+	}
+	return sourceCM, nil
+}
+
 func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("createConfigMaps")
 
@@ -190,14 +209,9 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 
 	log.V(2).Info("Entered with SyncToNamespaces" + nsListStr)
 
-	r.RunState.sourceConfigMapFound = true
-	sourceConfigMap, err := r.getSourceConfigMap(ctx, configMapSync)
+	sourceConfigMap, err := r.prepareSourceConfigMap(ctx, configMapSync)
 	if err != nil {
 		return err
-	}
-
-	if err := r.setOwnerRef(configMapSync, sourceConfigMap); err != nil {
-		log.Error(err, "Failed setting OwnerRef on Source ConfigMap")
 	}
 
 	configMaps := []*v1.ConfigMap{}
