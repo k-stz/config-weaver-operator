@@ -196,6 +196,10 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		return err
 	}
 
+	if err := r.setOwnerRef(configMapSync, sourceConfigMap); err != nil {
+		log.Error(err, "Failed setting OwnerRef on Source ConfigMap")
+	}
+
 	configMaps := []*v1.ConfigMap{}
 	for _, namespace := range configMapSync.Spec.SyncToNamespaces {
 		fmt.Println("Building ConfigMap for Namespace ", namespace)
@@ -210,7 +214,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 			// },
 			Data: sourceConfigMap.Data,
 		}
-		if err := r.setOwnerRef(ctx, configMapSync, cm); err != nil {
+		if err := r.setOwnerRef(configMapSync, cm); err != nil {
 			log.Error(err, "Failed setting OwnerRef")
 		}
 		configMaps = append(configMaps, cm)
@@ -268,7 +272,7 @@ func (r *ConfigMapSyncReconciler) getSourceConfigMap(ctx context.Context, cms *v
 // Deciding against setting owner reference, as the ConifgMapSync will be namespaced for
 // easier Multitenancy implementaiton. Instead, if a cross-namespace GC is needed, it can
 // be implemented by the controller by using a magic label that all synced namespaces can share
-func (r *ConfigMapSyncReconciler) setOwnerRef(ctx context.Context, owner *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) error {
+func (r *ConfigMapSyncReconciler) setOwnerRef(owner *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) error {
 	//	log := log.FromContext(ctx).WithName("setOwnerRef")
 
 	if err := ctrl.SetControllerReference(owner, cm, r.Scheme); err != nil {
