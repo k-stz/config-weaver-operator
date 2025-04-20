@@ -222,10 +222,6 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 				Name:      "createdbymycontroller",
 				Namespace: namespace,
 			},
-			//Data["testData"] = "hi",
-			// Data: map[string]string{
-			// 	"testNum": testNumString,
-			// },
 			Data: sourceConfigMap.Data,
 		}
 		if err := r.setOwnerRef(configMapSync, cm); err != nil {

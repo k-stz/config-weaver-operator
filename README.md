@@ -3,14 +3,15 @@ The `config-weaver-operator` simplifies configuration management by automaticall
 
 ## Goals
 - [x] Generate ConfigMaps accross namespaces (no content yet, just by name), use cluster-scoped CR for easier implementation 
-- [x] Ensure ConfigMaps are kept in sync on change => via ownerReference Watch on clusterscoped CR
+- [x] Ensure ConfigMaps are kept in sync on change => implemented via ownerReference Watch on clusterscoped CR
 - [x] Sync whole content of ConfigMaps
-- [ ] Ensure endless reconcile loops don't occur on .spec.conditions append
-- [ ] Ensure .Status is rebuild on each reconcilation when needed
+- [x] Ensure endless reconcile loops don't occur on .spec.conditions append; => fixed by using library function `meta.SetStatusCondition` which gives set-like properties and orders all conditions deterministically and only changes timestamps conditions status changed => thus avoiding unnecessary event when applying 
+- [x] sync ConfigMap content as well with given source ConfigMap
+- [x] Ensure .Status is rebuild on each reconcilation when needed => not complete but implemented by tracking the state of the reconciliation in the reciver struct's field ConfigMapSyncReconciler.RunState. And at the end of the Reconcile()-call the conditions are built
 - [ ] Implement ObservedGeneration
 - [ ] Implement timebased reconcilation trigger for robustness (when missed event "edges" in the signalig due to, for example, network partition or noisy neighbor)
 - [x] implement ownership and cascading deletion: deleting ConfigMapSync deletes all configmaps => via ownerReference on cluster-scoped CR
-- [ ] .Status: imlement tracking significant state transitions with .status.Conditions
+- [ ] .Status: imlement tracking significant state transitions with .status.Conditions; implement at least the "Ready" state
 - [ ] Log levels: ensure logs for state transitions use verbosity level also matches the details level. For example r.Update() should be logged at low verbosity but entering a function at high verbosity
 - [ ] Inspect when DeepCopy() is necessary: For example when concurrent Reconciliation take place and concurrent process A executes an r.Get() fetching the object state from the K8s API and then an r.Updates() does it get written to a cache shared between other concurrent goroutines? Such that if process B executes an r.Get() does it feath instead process A's altered memory from the cache, leading to an unintendet state?
 - [ ] Testing: Inspect testing framework capability and implement some tests for the controller, derive goals from that
@@ -31,8 +32,8 @@ Metrics
 
 Other Features:
 - [ ] Analyze how the concept of Informers and workqueues impact Operator development. Is it just a performance feature?
-- [ ] WebhookServer: Inspect usecases in operator development
-- [ ] Leader Election: How can it be added to the manager setup, what pros and cons does it provide (complexity increase?). Does it increase complexity of the reconciliation logic and how does it relate the controller setup option `MaxConcurrentReconciles`
+- [ ] WebhookServer: Inspect usecases in operator development; Probably defaulting values and required fields
+- [ ] Leader Election: How can it be added to the manager setup, what pros and cons does it provide (complexity increase?). Does it increase complexity of the reconciliation logic and how does it relate the controller setup option `MaxConcurrentReconciles`. I guess this is just for high-availability
 
 
 ## Description
