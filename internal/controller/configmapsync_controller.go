@@ -129,7 +129,7 @@ func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v
 	newCondition := metav1.Condition{
 		Type:               "Synced",
 		Status:             metav1.ConditionStatus("True"),
-		ObservedGeneration: 0, // TODO implement ObervedGeneration in metadata.generation
+		ObservedGeneration: cms.GetGeneration(), // TODO implement ObervedGeneration in metadata.generation
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
 		Reason:  "SourceConfigMapSynced",
 		Message: "Source ConfigMap synced from namespace " + cms.Spec.SourceNamespace,
@@ -146,10 +146,10 @@ func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, c
 		Status:             metav1.ConditionTrue,
 		ObservedGeneration: 0, // TODO implement ObervedGeneration in metadata.generation
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
-		Reason:  "ConfgigMapFound",
+		Reason:  "ConfigMapFound",
 		Message: "Source ConfigMap found in namespace " + cms.Spec.SourceNamespace,
 	}
-	log.Info("RunState is sourceConfigMapFound" + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
+	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
 	if !r.RunState.sourceConfigMapFound {
 
 		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
@@ -205,7 +205,6 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 	configMapSync = configMapSync.DeepCopy()
 	nsList := configMapSync.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
-	//testNumString := fmt.Sprintf("%d", configMapSync.Spec.TestNum)
 
 	log.V(2).Info("Entered with SyncToNamespaces" + nsListStr)
 
@@ -219,7 +218,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		fmt.Println("Building ConfigMap for Namespace ", namespace)
 		cm := &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "createdbymycontroller",
+				Name:      sourceConfigMap.GetName(),
 				Namespace: namespace,
 			},
 			Data: sourceConfigMap.Data,
@@ -235,7 +234,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 	log.V(1).Info("create/update ConfigMaps...")
 	for i, cm := range configMaps {
 		iter := strconv.Itoa(i)
-		log.Info(iter + ". Iteration for ns: " + cm.Namespace)
+		log.Info(iter + ". Iteration for ns: " + cm.Namespace + " with name:" + cm.Name)
 		nsKey := client.ObjectKey{
 			Namespace: cm.Namespace,
 			Name:      cm.Name,
