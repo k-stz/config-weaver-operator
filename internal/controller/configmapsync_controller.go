@@ -124,12 +124,24 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 	return nil
 }
 
+// TODO implement
+func (r *ConfigMapSyncReconciler) updateReadyStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+	newCondition := metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionStatus("True"), // TODO set according to RunState
+		ObservedGeneration: cms.GetGeneration(),
+		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
+		Reason:  "LGTM",                // TODO
+		Message: "All Syncs attempted", // TODO what
+	}
+	return r.updateStatusWithCondition(ctx, newCondition, cms)
+}
+
 func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	// TODO set it accodring to state that is tracked in ConfigMapSyncReconciler, for now hardcoded
 	newCondition := metav1.Condition{
 		Type:               "Synced",
 		Status:             metav1.ConditionStatus("True"),
-		ObservedGeneration: cms.GetGeneration(), // TODO implement ObervedGeneration in metadata.generation
+		ObservedGeneration: cms.GetGeneration(),
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
 		Reason:  "SourceConfigMapSynced",
 		Message: "Source ConfigMap synced from namespace " + cms.Spec.SourceNamespace,
@@ -138,13 +150,12 @@ func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v
 }
 
 func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	// TODO set it accodring to state that is tracked in ConfigMapSyncReconciler, for now hardcoded
 	log := log.FromContext(ctx).WithName("Reconcile>updateSourceFoundStatus")
 
 	newCondition := metav1.Condition{
 		Type:               "SourceConfigMapFound",
 		Status:             metav1.ConditionTrue,
-		ObservedGeneration: 0, // TODO implement ObervedGeneration in metadata.generation
+		ObservedGeneration: cms.GetGeneration(),
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
 		Reason:  "ConfigMapFound",
 		Message: "Source ConfigMap found in namespace " + cms.Spec.SourceNamespace,
