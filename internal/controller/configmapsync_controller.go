@@ -38,9 +38,9 @@ import (
 // Represents staet of a single reconciliation run
 // used to regenerate fresh status for ConfigMapSync.status
 type RunState struct {
-	cmsDeleted           bool // Set to true, when r.Get() returns nil!
-	sourceConfigMapFound bool
-	allSynced            bool
+	cmsDeleted             bool // Set to true, when r.Get() returns nil!
+	sourceConfigMapFound   bool
+	targetConfigMapsSynced bool // true when all target configmaps
 }
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
@@ -96,10 +96,12 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// try to create a configmap
 	if err := r.createConfigMaps(ctx, &configMapSync); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
+		r.RunState.targetConfigMapsSynced = false
 		r.updateStatus(ctx, &configMapSync)
 		return ctrl.Result{}, err
 	}
 
+	r.RunState.targetConfigMapsSynced = true
 	r.updateStatus(ctx, &configMapSync)
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
@@ -112,43 +114,64 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("updateStatus")
 
-	if err := r.updateSyncedStatus(ctx, cms); err != nil {
-		log.Error(err, "unable to update Status")
+	if err := r.updateSourceFoundStatus(ctx, cms); err != nil {
+		log.Error(err, "unable to update Status SourceFound")
 		return err
 	}
 
-	if err := r.updateSourceFoundStatus(ctx, cms); err != nil {
-		log.Error(err, "unable to update Status")
+	if err := r.updateSyncedStatus(ctx, cms); err != nil {
+		log.Error(err, "unable to update Status Synced")
+		return err
+	}
+
+	if err := r.updateReadyStatus(ctx, cms); err != nil {
+		log.Error(err, "unable to update Status Ready")
 		return err
 	}
 	return nil
 }
 
-// TODO implement
+// Whether ConfiMapSync controller is operational and state successfully reconciled
 func (r *ConfigMapSyncReconciler) updateReadyStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	newCondition := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionStatus("True"), // TODO set according to RunState
 		ObservedGeneration: cms.GetGeneration(),
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
-		Reason:  "LGTM",                // TODO
-		Message: "All Syncs attempted", // TODO what
+		Reason:  "AllSyncsAttempted",
+		Message: "source ConfigMap present and target configmap syncs attempted ",
 	}
+
+	if !r.RunState.sourceConfigMapFound || !r.RunState.targetConfigMapsSynced {
+		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
+		newCondition.Reason = "NotReady"
+		newCondition.Message = "ConfigMaps either not synced or source ConfigMap missing"
+	}
+
 	return r.updateStatusWithCondition(ctx, newCondition, cms)
 }
 
 func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+	// true default
 	newCondition := metav1.Condition{
-		Type:               "Synced",
+		Type:               "AllTargetsSynced",
 		Status:             metav1.ConditionStatus("True"),
 		ObservedGeneration: cms.GetGeneration(),
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
-		Reason:  "SourceConfigMapSynced",
-		Message: "Source ConfigMap synced from namespace " + cms.Spec.SourceNamespace,
+		Reason:  "AllSyncsSuccessful",
+		Message: "Attempted to sync all target ConfigMaps",
 	}
+	// false alternative fields
+	if !r.RunState.targetConfigMapsSynced {
+		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
+		newCondition.Reason = "SyncsFailed"
+		newCondition.Message = "Failed to attempt to sync all target ConfigMaps"
+	}
+
 	return r.updateStatusWithCondition(ctx, newCondition, cms)
 }
 
+// TODO: not called if createConfigmaps targets fails, so not updated...
 func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateSourceFoundStatus")
 
@@ -160,9 +183,8 @@ func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, c
 		Reason:  "ConfigMapFound",
 		Message: "Source ConfigMap found in namespace " + cms.Spec.SourceNamespace,
 	}
-	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
-	if !r.RunState.sourceConfigMapFound {
-
+	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.targetConfigMapsSynced))
+	if !r.RunState.targetConfigMapsSynced {
 		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
 		newCondition.Reason = "ConfigMapMissing"
 		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.SourceNamespace
