@@ -272,3 +272,38 @@ According to the api-convention Conditions are most useful when they follow some
 - Should describe the current observed state, rather than curren tstate tranistions. Thus typically use adjective ("Ready", "OutOfDisk") or past-tense verb ("Succeeded", "Failed") rather than a present-tense ver ("Deploying")
   - The latter, intermediate states, may be indicated by setting the status of the condition to `Unknown`
   - For state Transitions that take a long time (e.g. more than 1 minute), it is reasonable to treat the trasition itself as an observed state!. In this case a Condition such as "Resizing" itself should not be transient and should instead be signalled using True/False/Unknown pattern.
+
+## Testing
+On each change to the controller I'd like to test a bunch of scenarios automatically, to ensure certain features still work and we're not regressing (thus so called "regression testing"). Some example tests are:
+- TODO name some
+
+## API Machinery: Phases vs Conditions
+Discussion/Source: https://github.com/kubernetes/kubernetes/issues/7856
+Issue by Briant Grant, lead architect behind Kubernetes API design
+
+thockin: "orthogonal Conditions is really what we agreed on months ago"
+
+### HOw to model the "Absence" of something?
+thockin: "What's not clear [...] is how someone is supposred to know what th ABSENCE of a Condition means."
+
+Given the example of an async external LB assignment, where we might suggest that a Service should remain "not-ready" until ENdpoints are "non-empty". So how to denote that Service.Status.Phase is "not-ready"? With a "Pending" Condition, that the EndpointsController has to clear?
+
+
+### Conditions: What should {type: ready, status: "Unknown"} mean?
+"it might or might not be ready, we don't know"
+<hr> => meaning: "Unknown" is a fact about the *writer* of the conditinon, and not a claim about the *object*!
+<hr> Also generally it is a hint that the object is still being reconciled
+
+
+### API Machinery: What is the difference between a Phase and a Condition?
+
+### K8s API: Why are Conditions more extensible (compared to phases)?
+adding new conditions doesn't (and shouldn't) invalidate decisions based on existing conditions
+=> They're orthogonal
+<hr> better suited to reflect conditions/properties that may toggle back and forth and/or that may not be mutually exclusive
+<hr> While phases would attempt to reflect a single state that encompasses a set of conditions - "rather than distributing logic that combines multiple conditions or orther properties for common inferences, such as whether the scheduler may schedule new pods to a node, we should expose those properties/conditions explicitly, for similar reasons as why we explicitly return fields containing default values"
+
+
+
+
+## K8s API: Why is enumerated states not extensible?
