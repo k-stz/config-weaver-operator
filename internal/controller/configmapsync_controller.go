@@ -86,6 +86,11 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		cmsFound = false
 	}
+	// Works; refers to shared r struct
+	defer func() {
+		r.updateStatus(ctx, &configMapSync)
+	}()
+
 	// if not found, then we have a deletion
 	if cmsFound {
 		log.V(1).Info("found configMapSync in " + req.String())
@@ -100,9 +105,9 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		r.updateStatus(ctx, &configMapSync)
 		return ctrl.Result{}, err
 	}
-
 	r.RunState.targetConfigMapsSynced = true
-	r.updateStatus(ctx, &configMapSync)
+
+	//r.updateStatus(ctx, &configMapSync)
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
 
@@ -119,7 +124,7 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 		return err
 	}
 
-	if err := r.updateSyncedStatus(ctx, cms); err != nil {
+	if err := r.updateAllTargetsSyncedStatus(ctx, cms); err != nil {
 		log.Error(err, "unable to update Status Synced")
 		return err
 	}
@@ -135,7 +140,7 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 func (r *ConfigMapSyncReconciler) updateReadyStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	newCondition := metav1.Condition{
 		Type:               "Ready",
-		Status:             metav1.ConditionStatus("True"), // TODO set according to RunState
+		Status:             metav1.ConditionStatus("True"),
 		ObservedGeneration: cms.GetGeneration(),
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
 		Reason:  "AllSyncsAttempted",
@@ -151,7 +156,7 @@ func (r *ConfigMapSyncReconciler) updateReadyStatus(ctx context.Context, cms *v1
 	return r.updateStatusWithCondition(ctx, newCondition, cms)
 }
 
-func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+func (r *ConfigMapSyncReconciler) updateAllTargetsSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	// true default
 	newCondition := metav1.Condition{
 		Type:               "AllTargetsSynced",
@@ -171,7 +176,6 @@ func (r *ConfigMapSyncReconciler) updateSyncedStatus(ctx context.Context, cms *v
 	return r.updateStatusWithCondition(ctx, newCondition, cms)
 }
 
-// TODO: not called if createConfigmaps targets fails, so not updated...
 func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateSourceFoundStatus")
 
@@ -183,8 +187,8 @@ func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, c
 		Reason:  "ConfigMapFound",
 		Message: "Source ConfigMap found in namespace " + cms.Spec.SourceNamespace,
 	}
-	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.targetConfigMapsSynced))
-	if !r.RunState.targetConfigMapsSynced {
+	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
+	if !r.RunState.sourceConfigMapFound {
 		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
 		newCondition.Reason = "ConfigMapMissing"
 		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.SourceNamespace
@@ -196,7 +200,6 @@ func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, c
 func (r *ConfigMapSyncReconciler) updateStatusWithCondition(ctx context.Context, newCondition metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
 
-	//TODO use SetStatusCondition!
 	cmsCopy := cms.DeepCopy()
 	meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCondition)
 	// .status should be able to be reconstituted from the state of the world
@@ -221,7 +224,6 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 		return nil, err
 	}
 	r.RunState.sourceConfigMapFound = true
-
 	if err := r.setOwnerRef(configMapSync, sourceCM); err != nil {
 		log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
 	}
@@ -305,7 +307,6 @@ func (r *ConfigMapSyncReconciler) getSourceConfigMap(ctx context.Context, cms *v
 		Name:      cms.Spec.Source.Name,
 	}
 	if err := r.Get(ctx, nsKey, cm); err != nil {
-		r.RunState.sourceConfigMapFound = false
 		return cm, err
 	}
 	return cm, nil
