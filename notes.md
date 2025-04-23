@@ -273,9 +273,7 @@ According to the api-convention Conditions are most useful when they follow some
   - The latter, intermediate states, may be indicated by setting the status of the condition to `Unknown`
   - For state Transitions that take a long time (e.g. more than 1 minute), it is reasonable to treat the trasition itself as an observed state!. In this case a Condition such as "Resizing" itself should not be transient and should instead be signalled using True/False/Unknown pattern.
 
-## Testing
-On each change to the controller I'd like to test a bunch of scenarios automatically, to ensure certain features still work and we're not regressing (thus so called "regression testing"). Some example tests are:
-- TODO name some
+
 
 ## API Machinery: Phases vs Conditions
 Discussion/Source: https://github.com/kubernetes/kubernetes/issues/7856
@@ -296,6 +294,10 @@ Given the example of an async external LB assignment, where we might suggest tha
 
 
 ### API Machinery: What is the difference between a Phase and a Condition?
+A phase follows state machine semantics 
+
+The pattern of using phase is deprecated, meaning new extensions to k8s, like this operator, shouldn't use it. (Source api-conventions: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
+
 
 ### K8s API: Why are Conditions more extensible (compared to phases)?
 adding new conditions doesn't (and shouldn't) invalidate decisions based on existing conditions
@@ -304,6 +306,29 @@ adding new conditions doesn't (and shouldn't) invalidate decisions based on exis
 <hr> While phases would attempt to reflect a single state that encompasses a set of conditions - "rather than distributing logic that combines multiple conditions or orther properties for common inferences, such as whether the scheduler may schedule new pods to a node, we should expose those properties/conditions explicitly, for similar reasons as why we explicitly return fields containing default values"
 
 
+## K8s API: Why are enumerated states not extensible?
 
 
-## K8s API: Why is enumerated states not extensible?
+# Testing
+On each change to the controller I'd like to test a bunch of scenarios automatically, to ensure certain features still work and we're not regressing (thus so called "regression testing"). Some example tests are:
+- TODO name some
+
+## Operator-SDK Testing
+Source: https://sdk.operatorframework.io/docs/building-operators/golang/testing/
+
+Operator-SDK recomments `envtest` to write tests for Operators projects as it: 
+- has a more active contributor commmunity, 
+- more mautre than Operator SDK's test framework
+- offline: doesn't require an actual cluster to run tests (huge benefit in CI scnearios)
+
+### Framework suppport
+the file `controllers/suite_test.go` is created when a controller is scaffolded by the tool.
+The file contians:
+- boilerplate for executing integration tests using `envtests` with `ginkgo` and `gomega`
+
+## `envtest`
+### What is `envtest`
+A go package that provides librareis for integration testing by starting a local control plane
+<hr> Control plane binaries (etcd and kube-apiserver, but "without kubelet, controller-manager or other components.") are loaded by default from `/usr/local/kubebuilder/bin` this can be overridden with the envvar `KUBEBUILDER_ASSETS` (this is set in the Makefile target `test:`!)
+
+

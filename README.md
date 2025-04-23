@@ -9,7 +9,7 @@ The `config-weaver-operator` simplifies configuration management by automaticall
 - [x] sync ConfigMap content as well with given source ConfigMap
 - [x] Ensure .Status is rebuild on each reconcilation when needed => not complete but implemented by tracking the state of the reconciliation in the reciver struct's field ConfigMapSyncReconciler.RunState. And at the end of the Reconcile()-call the conditions are built
 - [x] Implement ObservedGeneration => comes with meta.SetStatusCondition
-- [ ] Implement timebased reconcilation trigger for robustness (when missed event "edges" in the signalig due to, for example, network partition or noisy neighbor)
+- [ ] Implement timebased reconcilation trigger for robustness (when missed event "edges" in the signalig due to, for example, network partition or noisy neighbor) => implement this via the Reoncile() returned `Result{RequeueAfter: <time.Duration>}` struct
 - [x] implement ownership and cascading deletion: deleting ConfigMapSync deletes all configmaps => via ownerReference on cluster-scoped CR
 - [x] .Status: imlement tracking significant state transitions with .status.Conditions; implement at least the "Ready" state
 - [ ] Log levels: ensure logs for state transitions use verbosity level also matches the details level. For example r.Update() should be logged at low verbosity but entering a function at high verbosity
