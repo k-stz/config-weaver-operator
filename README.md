@@ -8,10 +8,10 @@ The `config-weaver-operator` simplifies configuration management by automaticall
 - [x] Ensure endless reconcile loops don't occur on .spec.conditions append; => fixed by using library function `meta.SetStatusCondition` which gives set-like properties and orders all conditions deterministically and only changes timestamps conditions status changed => thus avoiding unnecessary event when applying 
 - [x] sync ConfigMap content as well with given source ConfigMap
 - [x] Ensure .Status is rebuild on each reconcilation when needed => not complete but implemented by tracking the state of the reconciliation in the reciver struct's field ConfigMapSyncReconciler.RunState. And at the end of the Reconcile()-call the conditions are built
-- [ ] Implement ObservedGeneration
+- [x] Implement ObservedGeneration => comes with meta.SetStatusCondition
 - [ ] Implement timebased reconcilation trigger for robustness (when missed event "edges" in the signalig due to, for example, network partition or noisy neighbor)
 - [x] implement ownership and cascading deletion: deleting ConfigMapSync deletes all configmaps => via ownerReference on cluster-scoped CR
-- [ ] .Status: imlement tracking significant state transitions with .status.Conditions; implement at least the "Ready" state
+- [x] .Status: imlement tracking significant state transitions with .status.Conditions; implement at least the "Ready" state
 - [ ] Log levels: ensure logs for state transitions use verbosity level also matches the details level. For example r.Update() should be logged at low verbosity but entering a function at high verbosity
 - [ ] Inspect when DeepCopy() is necessary: For example when concurrent Reconciliation take place and concurrent process A executes an r.Get() fetching the object state from the K8s API and then an r.Updates() does it get written to a cache shared between other concurrent goroutines? Such that if process B executes an r.Get() does it feath instead process A's altered memory from the cache, leading to an unintendet state?
 - [ ] Testing: Inspect testing framework capability and implement some tests for the controller, derive goals from that
