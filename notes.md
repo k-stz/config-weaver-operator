@@ -161,7 +161,7 @@ operator-sdk create api --group weaver --version v1alpha1 --kind ConfigMapSync -
 The resulting APIGroup  will be what you pass as --group in kubebuilder `create api` plus what you set as --domain in `operator-sdk init --domain`.
 So in this case will be `weaver.example.com`
 
-# Orphane cascading deletion
+# Orphan cascading deletion
 Astonishingly orphan deletion kubectl syntax is very picks:
 ```sh
 # works:
@@ -330,5 +330,23 @@ The file contians:
 ### What is `envtest`
 A go package that provides librareis for integration testing by starting a local control plane
 <hr> Control plane binaries (etcd and kube-apiserver, but "without kubelet, controller-manager or other components.") are loaded by default from `/usr/local/kubebuilder/bin` this can be overridden with the envvar `KUBEBUILDER_ASSETS` (this is set in the Makefile target `test:`!)
+
+# Deployment
+The controller needs access to the Kubernetes-API, if that's the case it can be deployed. So this can be:
+- Inside the cluster inside a pod
+- outside the cluster, as just a linux process running in your dev environment shell!
+- Or with OLM (operator lifecycle manager) though an operator catalog - really the holy grail for an operator-sdk developed operator
+
+## Outside Cluster: locally
+`make run` starts the go "manager" binary locally, subscribing to for watch events and whiping the cluster into the desired shape with Requests.
+
+## In Cluster: via deployment
+`make deploy` build and image and then deploy is as an k8s `Deployment`!
+
+The k8s Deployment will be templated with kustomize and simply assume the manager binary is already available in the registry. The image its trying to deploy has the very generic name `controller:latest`... uhhh what? 
+That's because the deploy target will template the deployment in config/default which has this value hardcoded.
+
+So how do we build that image?
+`make docker-build`
 
 
