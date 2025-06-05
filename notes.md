@@ -351,5 +351,44 @@ That's because the deploy target will template the deployment in config/default 
 So how do we build that image?
 `make docker-build`
 
+Then we can run it locally still:
+`docker run --rm controller:latest`
+But it will crash:
+```logs
+2025-06-05T22:11:40Z	ERROR	controller-runtime.client.config	unable to get kubeconfig	{"error": "invalid configuration: no configuration has been provided, try setting KUBERNETES_MASTER environment variable", "errorCauses": [{"error": "no configuration has been provided, try setting KUBERNETES_MASTER environment variable"}]}
+sigs.k8s.io/controller-runtime/pkg/client/config.GetConfigOrDie
+	/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.20.3/pkg/client/config/config.go:177
+```
+It crashes on creation of the Manager, while evaluating the aptly called `GetConfigOrDie()`
+
+```go
+mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+//.. step into GetConfigOrDie:
+func GetConfigOrDie() *rest.Config {
+	config, err := GetConfig()
+	if err != nil {
+		log.Error(err, "unable to get kubeconfig")  // <- there it is
+		os.Exit(1)
+	}
+	return config
+}
+```
+So it needs a kubeconfig, and it suggest we pr
+
+I wonder if when we run the manager later in a pod, in the cluster, it will notice that it has a serviceAccount mounted and attempt to talk to the kubernetes api via the canonical `kubernetes.default.svc.cluster.local` kubernetes service.
+  
+Anyway lets first simple try to provide it via a volumemount:
+`docker run --rm -v $HOME/.kube/config:/kubeconfig:ro -e KUBECONFIG=/kubeconfig controller:latest controller:latest`
+caveat: ensure that the .kube/config has read rights for other (chmod a+r) or else the DOCKERFILE USER can't read it.
+Anyway this gets the manager running but then it fails with a network issue issue:
+
+```bash
+	/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.20.3/pkg/internal/source/kind.go:64
+2025-06-05T22:42:40Z	ERROR	controller-runtime.source.EventHandler	failed to get informer from cache	{"error": "failed to get server groups: Get \"https://myraspi:44949/api\": dial tcp: lookup myraspi on 192.168.0.1:53: no such host"}
+```
+Which is an issue with the container network not being able to lookup in my lan DNS. Which is good enough for now. Let's focus on getting that pod deployed in the target cluster!
+
+
+
 ### Setup
 First run `make envtest`, this will download the Kubernetes API server vinaries to the bin/ folder in your project by default
