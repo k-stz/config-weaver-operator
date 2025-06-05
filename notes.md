@@ -351,8 +351,5 @@ That's because the deploy target will template the deployment in config/default 
 So how do we build that image?
 `make docker-build`
 
-
-=======
 ### Setup
 First run `make envtest`, this will download the Kubernetes API server vinaries to the bin/ folder in your project by default
->>>>>>> Stashed changes
