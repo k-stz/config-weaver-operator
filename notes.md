@@ -162,17 +162,18 @@ The resulting APIGroup  will be what you pass as --group in kubebuilder `create 
 So in this case will be `weaver.example.com`
 
 # Orphan cascading deletion
-Astonishingly orphan deletion kubectl syntax is very picks:
+The orphan deletion kubectl syntax is astonishingly picky:
+
 ```sh
 # works:
 kubectl delete configmapsyncs.weaver.example.com configmapsync-sample --cascade=orphan
-# doesn't work!
+# WRONG - doesn't work:
 # In this case the --cascade=orphan must use an equal sign for the option!
 kubectl delete configmapsyncs.weaver.example.com configmapsync-sample --cascade orphan
 ```
 
 # Switching CRD from namespaced to clusterscoped
-For an easier initial implementaiton ConfigMapSync will be switched from namespaced to cluster scope. This is achieved by simple setting the codemarker `+kubebuilder:resource:scope=Cluster` above the API type definition and run `make manifests`. To combine it with shortnaming, you need to write it in one:
+For an easier initial implementation ConfigMapSync will be switched from namespaced to cluster scope. This is achieved by simple setting the codemarker `+kubebuilder:resource:scope=Cluster` above the API type definition and run `make manifests`. To combine it with shortnaming, you need to write it in one:
 `// +kubebuilder:resource:scope=Cluster,path=configmapsyncs,shortName=cms;cmsync`
 Else when you write it in separate lines, only one entry will be considered
 
@@ -331,6 +332,7 @@ The file contians:
 A go package that provides librareis for integration testing by starting a local control plane
 <hr> Control plane binaries (etcd and kube-apiserver, but "without kubelet, controller-manager or other components.") are loaded by default from `/usr/local/kubebuilder/bin` this can be overridden with the envvar `KUBEBUILDER_ASSETS` (this is set in the Makefile target `test:`!)
 
+<<<<<<< Updated upstream
 # Deployment
 The controller needs access to the Kubernetes-API, if that's the case it can be deployed. So this can be:
 - Inside the cluster inside a pod
@@ -350,3 +352,7 @@ So how do we build that image?
 `make docker-build`
 
 
+=======
+### Setup
+First run `make envtest`, this will download the Kubernetes API server vinaries to the bin/ folder in your project by default
+>>>>>>> Stashed changes
