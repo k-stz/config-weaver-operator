@@ -386,7 +386,9 @@ Anyway this gets the manager running but then it fails with a network issue issu
 	/go/pkg/mod/sigs.k8s.io/controller-runtime@v0.20.3/pkg/internal/source/kind.go:64
 2025-06-05T22:42:40Z	ERROR	controller-runtime.source.EventHandler	failed to get informer from cache	{"error": "failed to get server groups: Get \"https://myraspi:44949/api\": dial tcp: lookup myraspi on 192.168.0.1:53: no such host"}
 ```
-Which is an issue with the container network not being able to lookup in my lan DNS. Which is good enough for now. Let's focus on getting that pod deployed in the target cluster!
+Which is an issue with the container network not being able to lookup in my lan DNS. To add the lookup docker you can either:
+- volume mount your /etc/hosts that has the `myraspi <ip>` entry or the more native way
+- using the -- `--addh-host` option with the docker cli: `docker run --rm -v $HOME/.kube/config:/kubeconfig:ro -e KUBECONFIG=/kubeconfig --add-host myraspi:192.168.0.123 controller:latest controller:latest` 
 
 
 
