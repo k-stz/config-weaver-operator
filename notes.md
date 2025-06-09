@@ -310,29 +310,7 @@ adding new conditions doesn't (and shouldn't) invalidate decisions based on exis
 ## K8s API: Why are enumerated states not extensible?
 
 
-# Testing
-On each change to the controller I'd like to test a bunch of scenarios automatically, to ensure certain features still work and we're not regressing (thus so called "regression testing"). Some example tests are:
-- TODO name some
 
-## Operator-SDK Testing
-Source: https://sdk.operatorframework.io/docs/building-operators/golang/testing/
-
-Operator-SDK recomments `envtest` to write tests for Operators projects as it: 
-- has a more active contributor commmunity, 
-- more mautre than Operator SDK's test framework
-- offline: doesn't require an actual cluster to run tests (huge benefit in CI scnearios)
-
-### Framework suppport
-the file `controllers/suite_test.go` is created when a controller is scaffolded by the tool.
-The file contians:
-- boilerplate for executing integration tests using `envtests` with `ginkgo` and `gomega`
-
-## `envtest`
-### What is `envtest`
-A go package that provides librareis for integration testing by starting a local control plane
-<hr> Control plane binaries (etcd and kube-apiserver, but "without kubelet, controller-manager or other components.") are loaded by default from `/usr/local/kubebuilder/bin` this can be overridden with the envvar `KUBEBUILDER_ASSETS` (this is set in the Makefile target `test:`!)
-
-<<<<<<< Updated upstream
 # Deployment
 The controller needs access to the Kubernetes-API, if that's the case it can be deployed. So this can be:
 - Inside the cluster inside a pod
@@ -390,7 +368,37 @@ Which is an issue with the container network not being able to lookup in my lan 
 - volume mount your /etc/hosts that has the `myraspi <ip>` entry or the more native way
 - using the -- `--addh-host` option with the docker cli: `docker run --rm -v $HOME/.kube/config:/kubeconfig:ro -e KUBECONFIG=/kubeconfig --add-host myraspi:192.168.0.123 controller:latest controller:latest` 
 
+# Testing
+On each change to the controller I'd like to test a bunch of scenarios automatically, to ensure certain features still work and we're not regressing (thus so called "regression testing"). Some example tests are:
+- basic sync feature: test synching configmap between two namespaces. Thus testing the core feature of this operator. First creating and then keeping in sync
+- testing deletion, so cleanup scenarios
+- eventually multitenancy: show that users, really service accounts, are allowed to sync only between namespace that they have access to!
+
+## Operator-SDK Testing
+Source: https://sdk.operatorframework.io/docs/building-operators/golang/testing/
+
+Operator-SDK recomments `envtest` to write tests for Operators projects as it: 
+- has a more active contributor commmunity, 
+- more mature than Operator SDK's test framework
+- offline: doesn't require an actual cluster to run tests (huge benefit in CI scnearios)
+
+### Framework suppport
+the file `internal/controller/suite_test.go` is created when a controller is scaffolded by the tool.
+The file contians:
+- boilerplate for executing integration tests using `envtests` with `ginkgo` and `gomega`
+
+## `envtest`
+Source: https://book.kubebuilder.io/reference/envtest.html
+### What is `envtest`
+A go package that provides libraries for integration testing for controllers by starting a local control plane
+<hr> Control plane binaries (etcd and kube-apiserver, but "without kubelet, controller-manager or other components.") are loaded by default from `/usr/local/kubebuilder/bin` this can be overridden with the envvar `KUBEBUILDER_ASSETS` (this is set in the Makefile target `test:`!)
 
 
 ### Setup
-First run `make envtest`, this will download the Kubernetes API server vinaries to the bin/ folder in your project by default
+Call `make envtest` this will: 
+- download the Kubernetes API server binaries to the `bin/k8s` folder including: `etcd`, `kubectl` and the `kube-apiserver`!
+
+this is done via the go cli command in the Makefile: `bin/setup-envtest use <version-to-download> --bin-dir bin/ -p path`
+
+### Write Test
+
