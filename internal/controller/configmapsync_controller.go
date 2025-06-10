@@ -68,6 +68,8 @@ type ConfigMapSyncReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var cmsFound bool = false // whether in this reconciliation run CMS was found
+
 	log := log.FromContext(ctx).WithName("Reconcile") // prepends name to log lines
 	if log.Enabled() {
 		log.V(1).Info("Reconcile invoked with Request: " + req.String())
@@ -77,24 +79,27 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// This cache might be shared by multiple instances of reconcilation
 	// that's why you shouldn't modify the object directly but first
 	// create a DeepCopy of it
-	cmsFound := true
+	cmsFound = true
 	configMapSync := v1alpha1.ConfigMapSync{}
 	if err := r.Get(ctx, req.NamespacedName, &configMapSync); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to get configMapSync")
+			r.updateStatus(ctx, &configMapSync)
 			return ctrl.Result{}, err
 		}
 		cmsFound = false
 	}
-	// Works; refers to shared r struct
-	defer func() {
-		r.updateStatus(ctx, &configMapSync)
-	}()
 
 	// if not found, then we have a deletion
 	if cmsFound {
 		log.V(1).Info("found configMapSync in " + req.String())
 	}
+
+	// Works; refers to shared r struct
+	// TODO: probably BUG causing to many updates in one invokation?
+	// defer func() {
+	// 	r.updateStatus(ctx, &configMapSync)
+	// }()
 
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
 	// So now we have a ConfigMapSync object, lets
@@ -107,6 +112,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	r.RunState.targetConfigMapsSynced = true
 
+	r.updateStatus(ctx, &configMapSync)
 	//r.updateStatus(ctx, &configMapSync)
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
@@ -118,26 +124,30 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("updateStatus")
+	var conds []metav1.Condition
+	conds = append(conds, r.generateSourceFoundCondition(ctx, cms))
+	conds = append(conds, r.generateAllTargetsSyncedStatusCondition(ctx, cms))
+	conds = append(conds, r.generateReadyStatusCondition(ctx, cms))
 
-	if err := r.updateSourceFoundStatus(ctx, cms); err != nil {
-		log.Error(err, "unable to update Status SourceFound")
-		return err
-	}
+	fmt.Println("## CURRENT CONDS len:", len(conds))
+	// This call changes the cms! so deep dopy is needed?
+	log.V(1).Info(fmt.Sprintf("Attempting to updateStatus"))
+	return r.updateStatusWithConditions(ctx, conds, cms)
 
-	if err := r.updateAllTargetsSyncedStatus(ctx, cms); err != nil {
-		log.Error(err, "unable to update Status Synced")
-		return err
-	}
+	// if err := r.updateAllTargetsSyncedStatus(ctx, cms); err != nil {
+	// 	log.Error(err, "unable to update Status Synced")
+	// 	return err
+	// }
 
-	if err := r.updateReadyStatus(ctx, cms); err != nil {
-		log.Error(err, "unable to update Status Ready")
-		return err
-	}
-	return nil
+	// if err := r.updateReadyStatus(ctx, cms); err != nil {
+	// 	log.Error(err, "unable to update Status Ready")
+	// 	return err
+	// }
+	//return nil
 }
 
 // Whether ConfiMapSync controller is operational and state successfully reconciled
-func (r *ConfigMapSyncReconciler) updateReadyStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+func (r *ConfigMapSyncReconciler) generateReadyStatusCondition(ctx context.Context, cms *v1alpha1.ConfigMapSync) metav1.Condition {
 	newCondition := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionStatus("True"),
@@ -153,11 +163,10 @@ func (r *ConfigMapSyncReconciler) updateReadyStatus(ctx context.Context, cms *v1
 		newCondition.Message = "ConfigMaps either not synced or source ConfigMap missing"
 	}
 
-	return r.updateStatusWithCondition(ctx, newCondition, cms)
+	return newCondition
 }
 
-func (r *ConfigMapSyncReconciler) updateAllTargetsSyncedStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	// true default
+func (r *ConfigMapSyncReconciler) generateAllTargetsSyncedStatusCondition(ctx context.Context, cms *v1alpha1.ConfigMapSync) metav1.Condition {
 	newCondition := metav1.Condition{
 		Type:               "AllTargetsSynced",
 		Status:             metav1.ConditionStatus("True"),
@@ -173,11 +182,11 @@ func (r *ConfigMapSyncReconciler) updateAllTargetsSyncedStatus(ctx context.Conte
 		newCondition.Message = "Failed to attempt to sync all target ConfigMaps"
 	}
 
-	return r.updateStatusWithCondition(ctx, newCondition, cms)
+	return newCondition
 }
 
-func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	log := log.FromContext(ctx).WithName("Reconcile>updateSourceFoundStatus")
+func (r *ConfigMapSyncReconciler) generateSourceFoundCondition(ctx context.Context, cms *v1alpha1.ConfigMapSync) metav1.Condition {
+	log := log.FromContext(ctx).WithName("Reconcile>generateSourceFoundCondition")
 
 	newCondition := metav1.Condition{
 		Type:               "SourceConfigMapFound",
@@ -193,29 +202,34 @@ func (r *ConfigMapSyncReconciler) updateSourceFoundStatus(ctx context.Context, c
 		newCondition.Reason = "ConfigMapMissing"
 		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.SourceNamespace
 	}
-
-	return r.updateStatusWithCondition(ctx, newCondition, cms)
+	return newCondition
 }
 
-func (r *ConfigMapSyncReconciler) updateStatusWithCondition(ctx context.Context, newCondition metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
+func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context, newConditions []metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
 
-	cmsCopy := cms.DeepCopy()
-	meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCondition)
+	cmsCopy := cms //.DeepCopy()
+	for _, newCond := range newConditions {
+		meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCond)
+	}
+
 	// .status should be able to be reconstituted from the state of the world
 	// so it's not a good idea to read from the status of the root object. Instead
 	// you should reconstruct it every run
 
 	// Update Status
+	// Update all conditions at once in one go, else we cet optimistic concurrency errors within the same reconcilition loop
 	err := r.Status().Update(ctx, cmsCopy)
 	if err != nil {
-		log.Error(err, "Failed Updating .status of ConfigMapSync DeepCopy")
+		log.Error(err, "Failed Updating .status of ConfigMapSync")
 		return err
 	}
 
 	return nil
 }
 
+// Fetch source ConfigMap and ensure the OwnerRef is set for and attempting to Update() it
+// Otherwise error out
 func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
 	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
 	sourceCM, err := r.getSourceConfigMap(ctx, configMapSync)
@@ -237,6 +251,9 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("createConfigMaps")
 
+	// TODO Do we have to do deepcopy here? we're not updating the cms here.
+	// My thinking: don't let another reconcile change the CMS as we iterate through the namespaces?
+	// But just another reconcile run would clean such a state up anyway?
 	configMapSync = configMapSync.DeepCopy()
 	nsList := configMapSync.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
