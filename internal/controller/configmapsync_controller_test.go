@@ -18,9 +18,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -43,6 +45,15 @@ var _ = Describe("ConfigMapSync Controller", func() {
 		configmapsync := &weaverv1alpha1.ConfigMapSync{}
 
 		BeforeEach(func() {
+			// first create the source ConfigMap
+			By("creating a the source configmap for further test")
+			resource := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+				Name:      "foocm",
+				Namespace: "default",
+			}}
+			fmt.Println("resource:", resource)
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+
 			By("creating the custom resource for the Kind ConfigMapSync")
 			err := k8sClient.Get(ctx, typeNamespacedName, configmapsync)
 			if err != nil && errors.IsNotFound(err) {
@@ -51,7 +62,12 @@ var _ = Describe("ConfigMapSync Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: weaverv1alpha1.ConfigMapSyncSpec{
+						Source: weaverv1alpha1.Source{
+							Name:      "foocm",
+							Namespace: "default",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
