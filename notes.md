@@ -395,10 +395,16 @@ A go package that provides libraries for integration testing for controllers by 
 
 
 ### Setup
-Call `make envtest` this will: 
-- download the Kubernetes API server binaries to the `bin/k8s` folder including: `etcd`, `kubectl` and the `kube-apiserver`!
+Call `make test:` which will call the Makefile target `envtest` 
+- the `envtest makefile target`: will download the `setup-envtest` cli and put it in `bin/`
+Then the target `test` is called:
+- the `test makefile target`: ensures that the Kubernetes API server binaries are downloaded to the `bin/k8s` folder including: `etcd`, `kubectl` and the `kube-apiserver`!
 
 this is done via the go cli command in the Makefile: `bin/setup-envtest use <version-to-download> --bin-dir bin/ -p path`
 
+The package `github.com/k-stz/config-weaver-operator/internal/controller` contians the envtest setup and will thus run envtest as part of the tests. The entry point for the tests is `internal/controller/suite_test.go`. Which contains `TestControllers` which invokes fucntion enrolling the whole Ginkgo testing process.
+`
+
 ### Write Test
+`internal/controller/suite_test.go` contains a test 
 
