@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,7 +50,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Name:      "foocm",
 				Namespace: "default",
 			}}
-			fmt.Println("resource:", resource)
+			// fmt.Println("resource:", resource)
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 
 			By("creating the custom resource for the Kind ConfigMapSync")

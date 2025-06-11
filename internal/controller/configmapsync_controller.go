@@ -205,9 +205,13 @@ func (r *ConfigMapSyncReconciler) generateSourceFoundCondition(ctx context.Conte
 	return newCondition
 }
 
+// Status update should be the last operation in a reconcile, else you'll just produce conflicts with
+// concurrent or the same reconcile goroutine!
 func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context, newConditions []metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
 
+	// TODO should do the deepcopy here, in case a parallel goroutine in the future might touch this object as well
+	// => Basically AVOID modifiying shared cms object form the cache by .DeepCopy()-ing them first!
 	cmsCopy := cms //.DeepCopy()
 	for _, newCond := range newConditions {
 		meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCond)
@@ -219,8 +223,14 @@ func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context
 
 	// Update Status
 	// Update all conditions at once in one go, else we cet optimistic concurrency errors within the same reconcilition loop
+	// TODO: can you do a server-side apply here? Is that what Update does?
 	err := r.Status().Update(ctx, cmsCopy)
 	if err != nil {
+		// TODO: you can gracefully retry this here. For example with this:
+		// if apierrors.IsConflict(err) {
+		// 	log.V(1).Info("Conflict during status update, requeuing!")
+		// 	return ctrl.Result{Requeue: true}, nil
+		// }
 		log.Error(err, "Failed Updating .status of ConfigMapSync")
 		return err
 	}
@@ -232,6 +242,7 @@ func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context
 // Otherwise error out
 func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
 	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
+	log.V(1).Info(fmt.Sprint("attempting to get sourceConfigMap"))
 	sourceCM, err := r.getSourceConfigMap(ctx, configMapSync)
 	if err != nil {
 		r.RunState.sourceConfigMapFound = false
@@ -354,7 +365,7 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&v1.ConfigMap{}).
 		// You can set many more options here, for example the number
 		// of concurrent reconciles (default is one) with:
-		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 0}).
 		// Furthermore "Predicates" can be added using
 		// .WithEvntFilter(<predicate.Predicate>) which
 		// can filter events by type (create, update,delete)
