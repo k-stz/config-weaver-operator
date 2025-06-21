@@ -36,56 +36,56 @@ var _ = Describe("ConfigMapSync Controller", func() {
 	Context("When reconciling a ConfigMapSync resource", func() {
 		ctx := context.Background()
 
+		// CMS setup
 		namespacedNameCMS := types.NamespacedName{
 			Name: "ginkgo-test-cms",
 			//Namespace: "default", // clusterscoped
 		}
 		cmsName := namespacedNameCMS.Name
-		//cmsNamespace := namespacedNameCMS.Namespace
+		objectCMS := &weaverv1alpha1.ConfigMapSync{}
 
+		// source CM setup
 		namespacedNameCM := types.NamespacedName{
 			Name:      "my-source-cm",
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		sourceCMName := namespacedNameCM.Name
-		sourceCMNamespace := namespacedNameCM.Namespace
-
-		objectCMS := &weaverv1alpha1.ConfigMapSync{}
+		sourceNamespace := namespacedNameCM.Namespace
 		objectSourceCM := &v1.ConfigMap{}
 
+		targetNamespace := "target-ns"
+
 		BeforeEach(func() {
-			// first create the source ConfigMap
-			By(fmt.Sprint("creating the source configmap ", sourceCMName, " in Namespace ", sourceCMNamespace))
+			By(fmt.Sprint("creating the target namespace ", targetNamespace))
+			Expect(k8sClient.Create(ctx, &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: targetNamespace},
+			})).To(Succeed())
+
+			By(fmt.Sprint("creating the source ConfigMap ", sourceCMName, " in Namespace ", sourceNamespace))
 			err := k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
 			if err != nil && errors.IsNotFound(err) {
 				objectCMS := &v1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "foocm",
-						Namespace: "default",
+						Name:      sourceCMName,
+						Namespace: sourceNamespace,
 					},
 					Data: map[string]string{"firstfield": "bar", "f2": "v2"},
 				}
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
 			}
 
-			objectSourceCM := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-				Name:      sourceCMName,
-				Namespace: sourceCMNamespace,
-			}}
-			Expect(k8sClient.Create(ctx, objectSourceCM)).To(Succeed())
-
-			By("creating the custom resource for the Kind ConfigMapSync")
+			By(fmt.Sprint("creating the custom resource for the Kind ConfigMapSync named ", cmsName))
 			err = k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
 			if err != nil && errors.IsNotFound(err) {
 				objectCMS := &weaverv1alpha1.ConfigMapSync{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      cmsName,
-						Namespace: "default",
+						Name: cmsName,
+						// Namespace: "default",
 					},
 					Spec: weaverv1alpha1.ConfigMapSyncSpec{
 						Source: weaverv1alpha1.Source{
 							Name:      sourceCMName,
-							Namespace: sourceCMNamespace,
+							Namespace: sourceNamespace,
 						},
 					},
 				}
@@ -94,8 +94,6 @@ var _ = Describe("ConfigMapSync Controller", func() {
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-
 			objectCMS := &weaverv1alpha1.ConfigMapSync{}
 			err := k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
 			Expect(err).NotTo(HaveOccurred())
@@ -106,6 +104,8 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			//Expect(k8sClient.Delete(ctx, resourceName)).To(Succeed())
 
 		})
+
+		// Here actual tests start
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ConfigMapSyncReconciler{
