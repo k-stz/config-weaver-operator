@@ -402,8 +402,17 @@ Then the target `test` is called:
 
 this is done via the go cli command in the Makefile: `bin/setup-envtest use <version-to-download> --bin-dir bin/ -p path`
 
-The package `github.com/k-stz/config-weaver-operator/internal/controller` contians the envtest setup and will thus run envtest as part of the tests. The entry point for the tests is `internal/controller/suite_test.go`. Which contains `TestControllers` which invokes fucntion enrolling the whole Ginkgo testing process.
-`
+The package `github.com/k-stz/config-weaver-operator/internal/controller` contians the envtest setup and will thus run envtest as part of the tests. The entry point for the tests is `internal/controller/suite_test.go`. Which contains `TestControllers` which invokes functions enrolling the whole Ginkgo testing process like `RunSpec(...)`.
+
+Get the Ginkgo cli `go install github.com/onsi/ginkgo/v2/ginkgo`and run the test with it, for example with -v to get a verbose output including the DSL outlines wiht BeforeSuite, AfterSuite and the prose inbetween.
+
+Run tests with `ginkgo -v`, this calls `go test` under the hood but has more options.
+
+### Gingko
+- A "spec": refers a test in Ginkgo, in order to differentiate them from the traditional go `testing` package tests.
+- Ginkgo suite: a collection of GInkgo specs in a given package
+
+
 
 ### Write Test
 `internal/controller/suite_test.go` contains a test 
