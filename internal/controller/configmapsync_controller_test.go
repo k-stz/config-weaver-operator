@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -33,38 +34,58 @@ import (
 
 var _ = Describe("ConfigMapSync Controller", func() {
 	Context("When reconciling a ConfigMapSync resource", func() {
-		const cmsResourceName = "test-resource"
-		const sourceConfigMapName = "foocm"
-
 		ctx := context.Background()
 
 		namespacedNameCMS := types.NamespacedName{
-			Name:      cmsResourceName,
+			Name: "ginkgo-test-cms",
+			//Namespace: "default", // clusterscoped
+		}
+		cmsName := namespacedNameCMS.Name
+		//cmsNamespace := namespacedNameCMS.Namespace
+
+		namespacedNameCM := types.NamespacedName{
+			Name:      "my-source-cm",
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		configmapsync := &weaverv1alpha1.ConfigMapSync{}
+		sourceCMName := namespacedNameCM.Name
+		sourceCMNamespace := namespacedNameCM.Namespace
+
+		objectCMS := &weaverv1alpha1.ConfigMapSync{}
+		objectSourceCM := &v1.ConfigMap{}
 
 		BeforeEach(func() {
 			// first create the source ConfigMap
-			By("creating the source configmap for further test")
-			sourceCM := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
-				Name:      "foocm",
-				Namespace: "default",
+			By(fmt.Sprint("creating the source configmap ", sourceCMName, " in Namespace ", sourceCMNamespace))
+			err := k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
+			if err != nil && errors.IsNotFound(err) {
+				objectCMS := &v1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "foocm",
+						Namespace: "default",
+					},
+					Data: map[string]string{"firstfield": "bar", "f2": "v2"},
+				}
+				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
+			}
+
+			objectSourceCM := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+				Name:      sourceCMName,
+				Namespace: sourceCMNamespace,
 			}}
-			Expect(k8sClient.Create(ctx, sourceCM)).To(Succeed())
+			Expect(k8sClient.Create(ctx, objectSourceCM)).To(Succeed())
 
 			By("creating the custom resource for the Kind ConfigMapSync")
-			err := k8sClient.Get(ctx, namespacedNameCMS, configmapsync)
+			err = k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
 			if err != nil && errors.IsNotFound(err) {
 				objectCMS := &weaverv1alpha1.ConfigMapSync{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      cmsResourceName,
+						Name:      cmsName,
 						Namespace: "default",
 					},
 					Spec: weaverv1alpha1.ConfigMapSyncSpec{
 						Source: weaverv1alpha1.Source{
-							Name:      "foocm",
-							Namespace: "default",
+							Name:      sourceCMName,
+							Namespace: sourceCMNamespace,
 						},
 					},
 				}
