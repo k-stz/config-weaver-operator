@@ -406,14 +406,31 @@ The package `github.com/k-stz/config-weaver-operator/internal/controller` contia
 
 Get the Ginkgo cli `go install github.com/onsi/ginkgo/v2/ginkgo`and run the test with it, for example with -v to get a verbose output including the DSL outlines wiht BeforeSuite, AfterSuite and the prose inbetween.
 
-Run tests with `ginkgo -v`, this calls `go test` under the hood but has more options.
+Run tests with `ginkgo -v`, this calls `go test` under the hood but has mor
 
 ### Gingko
+`internal/controller/suite_test.go` the Before- and AfterSuite. The BeforeSuite sets up the envtest a Fake for for the Kubernetes cluster using `envtest` consisting of only etcd and kube-apiserer. So it should only be about the api-machinery path from the Client->kube-apiserver->etcd but not actually create or change actual Pods running on the cluster. 
+
 - A "spec": refers a test in Ginkgo, in order to differentiate them from the traditional go `testing` package tests.
 - Ginkgo suite: a collection of GInkgo specs in a given package
 
-
-
 ### Write Test
-`internal/controller/suite_test.go` contains a test 
+The following test cases shall be implemented to prove the basic contract that the ConfigMapSync controller should always fulfill.
+
+- [x] BeforeSuite: Start an `envtest` kubernetes fake cluster
+- [x] AfterSuite: tear the `envtest` cluster down after all ginkgo specs have ran
+
+- [x] BeforeEach:
+  - [x] Create a source ConfigMap, without error
+  - [ ] Then Create sample ConfigMapSync referencing the source ConfigMap, without Error
+
+- [ ] Testcases:
+  - [ ] Check if target namespace contains a synced target ConfigMap
+  - [ ] Validate that the source and target ConfigMaps Data-fields match 
+  - [ ] Change the source ConfigMap and validate that the target ConfigMap still is in sync with the sourceConfigMap
+
+- [ ] AfterEach:
+  - [ ] Cleanup the source ConfigMap
+  - [ ] Cleanup the sample ConfigMapSync referencing the source ConfigMap, without Error
+
 

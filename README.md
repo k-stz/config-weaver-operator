@@ -1,4 +1,4 @@
-# config-weaver-operator
+# Description 
 The `config-weaver-operator` simplifies configuration management by automatically syncing ConfigMaps and Secrets across namespaces. Whether you need to distribute a `PullSecrets`, `CA` certificates, Trust Bundles, or other shared resources, this operator ensures consistency and reliability.
 
 ## Goals
@@ -34,10 +34,6 @@ Other Features:
 - [ ] Analyze how the concept of Informers and workqueues impact Operator development. Is it just a performance feature?
 - [ ] WebhookServer: Inspect usecases in operator development; Probably defaulting values and required fields
 - [ ] Leader Election: How can it be added to the manager setup, what pros and cons does it provide (complexity increase?). Does it increase complexity of the reconciliation logic and how does it relate the controller setup option `MaxConcurrentReconciles`. I guess this is just for high-availability
-
-
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
 
 
 ## Getting Started
@@ -126,8 +122,6 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/config-weaver-operator/
 ```
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
