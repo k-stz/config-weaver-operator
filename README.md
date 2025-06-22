@@ -14,7 +14,7 @@ The `config-weaver-operator` simplifies configuration management by automaticall
 - [x] .Status: imlement tracking significant state transitions with .status.Conditions; implement at least the "Ready" state
 - [ ] Log levels: ensure logs for state transitions use verbosity level also matches the details level. For example r.Update() should be logged at low verbosity but entering a function at high verbosity
 - [ ] Inspect when DeepCopy() is necessary: For example when concurrent Reconciliation take place and concurrent process A executes an r.Get() fetching the object state from the K8s API and then an r.Updates() does it get written to a cache shared between other concurrent goroutines? Such that if process B executes an r.Get() does it feath instead process A's altered memory from the cache, leading to an unintendet state?
-- [ ] Testing: Inspect testing framework capability and implement some tests for the controller, derive goals from that
+- [x] Testing: Inspect testing framework capability and implement some tests for the controller, derive goals from that => implemented using Ginkgo framework most crucial contractual tests regarding syncing of ConfigMaps (see notes.md `### Implemented Testcases`)
 
 Deployment:
 - [ ] Deploy in cluster pod

@@ -414,8 +414,8 @@ Run tests with `ginkgo -v`, this calls `go test` under the hood but has mor
 - A "spec": refers a test in Ginkgo, in order to differentiate them from the traditional go `testing` package tests.
 - Ginkgo suite: a collection of GInkgo specs in a given package
 
-### Write Test
-The following test cases shall be implemented to prove the basic contract that the ConfigMapSync controller should always fulfill.
+### Implemented Testcases
+The following test cases are implemented to prove the basic contract that the ConfigMapSync controller should always fulfill.
 
 - [x] BeforeSuite: Start an `envtest` kubernetes fake cluster
 - [x] AfterSuite: tear the `envtest` cluster down after all ginkgo specs have ran
