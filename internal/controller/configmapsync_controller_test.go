@@ -55,13 +55,14 @@ var _ = Describe("ConfigMapSync Controller", func() {
 
 		targetNamespace := "target-ns"
 
+		sourceCMDataContent := map[string]string{"firstfield": "bar", "f2": "v2"}
+
 		BeforeEach(func() {
 			By(fmt.Sprint("Ensure target namespace ", targetNamespace, " exists"))
 
 			err := k8sClient.Create(ctx, &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: targetNamespace},
 			})
-			fmt.Println("ERROR IS", err, "so bool alreadyexists test is", errors.IsAlreadyExists(err))
 			Expect(err == nil || errors.IsAlreadyExists(err)).To(BeTrue())
 
 			By(fmt.Sprint("creating the source ConfigMap ", sourceCMName, " in Namespace ", sourceNamespace))
@@ -72,7 +73,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 						Name:      sourceCMName,
 						Namespace: sourceNamespace,
 					},
-					Data: map[string]string{"firstfield": "bar", "f2": "v2"},
+					Data: sourceCMDataContent,
 				}
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
 			}
@@ -90,6 +91,8 @@ var _ = Describe("ConfigMapSync Controller", func() {
 							Name:      sourceCMName,
 							Namespace: sourceNamespace,
 						},
+						// configure target ns here
+						SyncToNamespaces: []string{targetNamespace},
 					},
 				}
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
@@ -112,7 +115,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 		})
 
 		// Are the "It()"s executed out-of-order?
-		It(fmt.Sprint("should successfully sync source ConfigMap ", sourceCMName, "to target ConfigMap in Namespace ", targetNamespace), func() {
+		It(fmt.Sprint("should successfully sync source ConfigMap ", sourceCMName, " to target ConfigMap in Namespace ", targetNamespace), func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ConfigMapSyncReconciler{
 				Client: k8sClient,
@@ -124,14 +127,13 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// TODO implement this, first add tyrget namespace to CMS Object!
-			// By(fmt.Sprint("Get the target ConfigMap from the synced to namespace", targetNamespace))
-			// var targetCM v1.ConfigMap
-			// // k8sClient.Get(ctx, types.NamespacedName{
-			// // 	Name:      sourceCMName,
-			// // 	Namespace: targetNamespace,
-			// // }, &targetCM)
-
+			By(fmt.Sprint("Check if source matches with target ConfigMap in namespace ", targetNamespace))
+			var targetCM v1.ConfigMap
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      sourceCMName,
+				Namespace: targetNamespace,
+			}, &targetCM)
+			Expect(err).NotTo(HaveOccurred())
 			// // Eventually doesn't seem to be needed for Get...
 			// Eventually(func() error {
 			// 	return k8sClient.Get(ctx, types.NamespacedName{
@@ -139,7 +141,8 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			// 		Namespace: targetNamespace,
 			// 	}, &targetCM)
 			// }, time.Second*5, time.Millisecond*200).Should(Succeed())
-			// Expect(targetCM.Data).To(Equal(map[string]string{"foo": "bar"}))
+
+			Expect(targetCM.Data).To(Equal(sourceCMDataContent))
 		})
 
 		AfterEach(func() {
@@ -154,20 +157,6 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			err = k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Delete(ctx, objectSourceCM)).To(Succeed())
-
-			// shouldn't be necessary, as they should get deleted via ownerReference setting...
-			// By("Cleanup target syned to ConfigMap")
-			// objectTargetCM := &v1.ConfigMap{}
-			// err = k8sClient.Get(ctx, namespacedNameCM, objectTargetCM)
-			// Expect(err).NotTo(HaveOccurred())
-			// Expect(k8sClient.Delete(ctx, objectSourceCM)).To(Succeed())
-
-			// By(fmt.Sprint("Cleanup the target namespace ", targetNamespace))
-			// objectTargetNamespace := &v1.Namespace{}
-			// err = k8sClient.Delete(ctx, &v1.Namespace{
-			// 	ObjectMeta: metav1.ObjectMeta{Name: targetNamespace},
-			// })
-			// Expect(err).NotTo(HaveOccurred())
 
 			// ENVTEST CAN'T DELETE NAMESPACES!
 			// Source: https://book.kubebuilder.io/reference/envtest.html?utm_source=chatgpt.com#namespace-usage-limitation
