@@ -56,13 +56,16 @@ var _ = Describe("ConfigMapSync Controller", func() {
 		targetNamespace := "target-ns"
 
 		BeforeEach(func() {
-			By(fmt.Sprint("creating the target namespace ", targetNamespace))
-			Expect(k8sClient.Create(ctx, &v1.Namespace{
+			By(fmt.Sprint("Ensure target namespace ", targetNamespace, " exists"))
+
+			err := k8sClient.Create(ctx, &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: targetNamespace},
-			})).To(Succeed())
+			})
+			fmt.Println("ERROR IS", err, "so bool alreadyexists test is", errors.IsAlreadyExists(err))
+			Expect(err == nil || errors.IsAlreadyExists(err)).To(BeTrue())
 
 			By(fmt.Sprint("creating the source ConfigMap ", sourceCMName, " in Namespace ", sourceNamespace))
-			err := k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
+			err = k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
 			if err != nil && errors.IsNotFound(err) {
 				objectCMS := &v1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{
@@ -93,19 +96,8 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			}
 		})
 
-		AfterEach(func() {
-			objectCMS := &weaverv1alpha1.ConfigMapSync{}
-			err := k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Cleanup the specific resource instance ConfigMapSync")
-			Expect(k8sClient.Delete(ctx, objectCMS)).To(Succeed())
-			By("Cleanup the specific source ConfigMap")
-			//Expect(k8sClient.Delete(ctx, resourceName)).To(Succeed())
-
-		})
-
 		// Here actual tests start
+
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ConfigMapSyncReconciler{
@@ -117,8 +109,92 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				NamespacedName: namespacedNameCMS,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
+
+		// Are the "It()"s executed out-of-order?
+		It(fmt.Sprint("should successfully sync source ConfigMap ", sourceCMName, "to target ConfigMap in Namespace ", targetNamespace), func() {
+			By("Reconciling the created resource")
+			controllerReconciler := &ConfigMapSyncReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: namespacedNameCMS,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// TODO implement this, first add tyrget namespace to CMS Object!
+			// By(fmt.Sprint("Get the target ConfigMap from the synced to namespace", targetNamespace))
+			// var targetCM v1.ConfigMap
+			// // k8sClient.Get(ctx, types.NamespacedName{
+			// // 	Name:      sourceCMName,
+			// // 	Namespace: targetNamespace,
+			// // }, &targetCM)
+
+			// // Eventually doesn't seem to be needed for Get...
+			// Eventually(func() error {
+			// 	return k8sClient.Get(ctx, types.NamespacedName{
+			// 		Name:      sourceCMName,
+			// 		Namespace: targetNamespace,
+			// 	}, &targetCM)
+			// }, time.Second*5, time.Millisecond*200).Should(Succeed())
+			// Expect(targetCM.Data).To(Equal(map[string]string{"foo": "bar"}))
+		})
+
+		AfterEach(func() {
+			By("Cleanup the specific resource instance ConfigMapSync")
+			objectCMS := &weaverv1alpha1.ConfigMapSync{}
+			err := k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Delete(ctx, objectCMS)).To(Succeed())
+
+			By("Cleanup the source ConfigMap")
+			objectSourceCM := &v1.ConfigMap{}
+			err = k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Delete(ctx, objectSourceCM)).To(Succeed())
+
+			// shouldn't be necessary, as they should get deleted via ownerReference setting...
+			// By("Cleanup target syned to ConfigMap")
+			// objectTargetCM := &v1.ConfigMap{}
+			// err = k8sClient.Get(ctx, namespacedNameCM, objectTargetCM)
+			// Expect(err).NotTo(HaveOccurred())
+			// Expect(k8sClient.Delete(ctx, objectSourceCM)).To(Succeed())
+
+			// By(fmt.Sprint("Cleanup the target namespace ", targetNamespace))
+			// objectTargetNamespace := &v1.Namespace{}
+			// err = k8sClient.Delete(ctx, &v1.Namespace{
+			// 	ObjectMeta: metav1.ObjectMeta{Name: targetNamespace},
+			// })
+			// Expect(err).NotTo(HaveOccurred())
+
+			// ENVTEST CAN'T DELETE NAMESPACES!
+			// Source: https://book.kubebuilder.io/reference/envtest.html?utm_source=chatgpt.com#namespace-usage-limitation
+			// By("Ensure target namespace is really deleted")
+			// Eventually(func() error {
+			// 	// TODO doesn't work, list all resource in the namespace to see what is blocking
+			// 	tmpNs := &v1.Namespace{}
+			// 	err := k8sClient.Get(ctx, types.NamespacedName{Name: targetNamespace}, tmpNs)
+			// 	fmt.Println("STILL NOT DELETED target-ns:", objectTargetNamespace)
+			// 	fmt.Println("deletion timestamp:", tmpNs.DeletionTimestamp, "phase:", tmpNs.Status.Phase)
+			// 	if err == nil {
+			// 		fmt.Println("Couldn't delete namespace, inspecting what configmaps still remain in cm")
+			// 		var configMaps v1.ConfigMapList
+			// 		err := k8sClient.List(ctx, &configMaps, client.InNamespace(targetNamespace))
+			// 		Expect(err).NotTo(HaveOccurred())
+			// 		fmt.Printf("Found %d configmaps in %s\n", len(configMaps.Items), targetNamespace)
+			// 		for _, cm := range configMaps.Items {
+			// 			fmt.Println("ConfigMap:", cm.Name)
+			// 		}
+
+			// 	}
+			// 	return err
+			// }, time.Second*5, time.Millisecond*200).ShouldNot(Succeed())
+
+			// Expect(err).To(HaveOccurred())
+
+		})
+
 	})
 })
