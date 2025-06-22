@@ -134,15 +134,45 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Namespace: targetNamespace,
 			}, &targetCM)
 			Expect(err).NotTo(HaveOccurred())
-			// // Eventually doesn't seem to be needed for Get...
-			// Eventually(func() error {
-			// 	return k8sClient.Get(ctx, types.NamespacedName{
-			// 		Name:      sourceCMName,
-			// 		Namespace: targetNamespace,
-			// 	}, &targetCM)
-			// }, time.Second*5, time.Millisecond*200).Should(Succeed())
-
 			Expect(targetCM.Data).To(Equal(sourceCMDataContent))
+		})
+
+		It("should keep target ConfigMap in sync when changing Data field in the source ConfigMap", func() {
+			By("By inserting a new field in the source ConfigMap")
+			var sourceCM v1.ConfigMap
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      sourceCMName,
+				Namespace: sourceNamespace,
+			}, &sourceCM)
+			Expect(err).NotTo(HaveOccurred())
+			sourceCM.Data["newField"] = "newValue"
+			err = k8sClient.Update(ctx, &sourceCM)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Reconciling the ConfigMapSync Resource")
+			controllerReconciler := &ConfigMapSyncReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: namespacedNameCMS,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Finally Checking if the target CM still matches the source CM Data field")
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      sourceCMName,
+				Namespace: sourceNamespace,
+			}, &sourceCM)
+			Expect(err).NotTo(HaveOccurred())
+			var targetCM v1.ConfigMap
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      sourceCMName,
+				Namespace: targetNamespace,
+			}, &targetCM)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(targetCM.Data).To(Equal(sourceCM.Data))
 		})
 
 		AfterEach(func() {

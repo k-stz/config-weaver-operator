@@ -422,15 +422,15 @@ The following test cases shall be implemented to prove the basic contract that t
 
 - [x] BeforeEach:
   - [x] Create a source ConfigMap, without error
-  - [ ] Then Create sample ConfigMapSync referencing the source ConfigMap, without Error
+  - [x] Then Create sample ConfigMapSync referencing the source ConfigMap, without Error
 
-- [ ] Testcases:
-  - [ ] Check if target namespace contains a synced target ConfigMap
-  - [ ] Validate that the source and target ConfigMaps Data-fields match 
-  - [ ] Change the source ConfigMap and validate that the target ConfigMap still is in sync with the sourceConfigMap
+- [x] Testcases:
+  - [x] Check if target namespace contains a synced target ConfigMap
+  - [x] Validate that the source and target ConfigMaps Data-fields match 
+  - [x] Change the source ConfigMap and validate that the target ConfigMap still is in sync with the sourceConfigMap
 
-- [ ] AfterEach:
-  - [ ] Cleanup the source ConfigMap
-  - [ ] Cleanup the sample ConfigMapSync referencing the source ConfigMap, without Error
+- [x] AfterEach:
+  - [x] Cleanup the source ConfigMap
+  - [x] Cleanup the sample ConfigMapSync referencing the source ConfigMap, without Error
 
 
