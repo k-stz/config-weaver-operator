@@ -23,7 +23,7 @@ Deployment:
 
 Security:
 - [ ] Multitenancy: Can the operator be namespaced and run only in a subset of namespaces. Such that differnt users in the same cluster can't tamper with each otherss namespaces and configmaps?
-  - [ ]: Research SAR (Subject Access review) suitability with practical use
+  - [ ]: Research SAR (Subject Access review) suitability with practical use => Used for Authorization access review in Kubernetes. Can be used to query what actions a serviceaccount is allowed to do against the kube-apiserver API. Use `LocalSubjectAccessReview` to co-locate a namespaced ConfigMapSync-Object with the serviceaccount on which behalf configmaps will be synced across namespaces. 
   - [ ]: implement namespaced `ConfigMapSync`
   - [ ]: allow providing ServiceAccount on which behalv configmap Syncing will be allowed.
   - [ ]: default/impute the ServiceAccount "default" => maybe this is a usecase for the WebhookServer!
