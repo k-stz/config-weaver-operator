@@ -32,7 +32,8 @@ Security:
   - [ ] allow providing ServiceAccount on which behalf ConfigMap syncing will be allowed.
   - [ ] default/impute the ServiceAccount "default" => maybe this is a usecase for the WebhookServer!
   - [ ] Cache Serviceaccount TokenRequest tokens using a thread-safe (because reconciliation can be concurrent) keyed map by `namespace/name` of the ConfigMapSync CR, as this will be unique, because it's namespaces. This can be apparently stored in the Reconcile struct as this is shared among the concurrent goroutines. Auto-renew on expiration (lazy, on-demand: so if not found => do TokenRequest and write in thread-safe map). Example implementation:
-   ```go
+
+```go
 func NewTokenCache() *TokenCache {
     return &TokenCache{
         tokens: make(map[string]tokenEntry),
@@ -60,8 +61,9 @@ func (c *TokenCache) Set(key, token string) {
         token:     token,
     }
 }
-   ```
-  - [ ] Garbage Collection: When `ConfigMapSync` is namespaced, owernRef isn't possible. Need to implement GC via finalizer. For this track ownership via a label or annotation e.g. `configmapsync.owern=<namespace>/<name>`
+```
+
+- [ ] Garbage Collection: When `ConfigMapSync` is namespaced, owernRef isn't possible. Need to implement GC via finalizer. For this track ownership via a label or annotation e.g. `configmapsync.owern=<namespace>/<name>`
   - [ ] Document this ownership clearly for users
   - [ ] add .status.Condition for failing SARs; to clearly and "loudly" inform user if SA has insufficient rights, plus controller Logs and maybe even Events on the CR. Something like "SA X in namespace Y cannot create ConfigMap in namespace Z" 
 
