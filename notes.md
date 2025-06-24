@@ -242,7 +242,7 @@ Impersonation vs Token Use Tradeoffs
   - Cleaner and easier to audit
   - Usability: If no ServiceAccount is provided the current namespace's `default`-ServiceAccount is imputed => via WebServer defaulting!?
 
-### Complication: ownerReference for namespaced Ressource 
+### Complication: ownerReference for namespaced Resource 
 To ease the multitenant implementation, namespaced CR (`ConfigMapSync`) is preferred. But the created ConfigMaps can't then set the ownerReference, as this is forbidden to point to a namespaced owner.
 What do we need the ownerReference for:
 - easy GC: when deleting CR all childs dependents will also be deleted
@@ -254,6 +254,11 @@ Possible Solutions:
   - The ConfigMapSync CRs can be indexed! See "mgr.GetFieldIndexer"...
   - watch ConfigMaps with a custom event handler, instead of .Owns() use .Watches()... effectively triggering the reconciliation handler for the `ConfigMapSync`` controller whenever a ConfigMap is updated with the labels set!
   - finalizers: to get GC back in, we can implement logic on the /finalizer subresource!
+
+### Analyzing cluster-logging-forwarder operator implementation
+repo: ` https://github.com/openshift/cluster-logging-operator`
+
+
 
 ## ConfigMapSync: Conditations
 in `.status.conditions` a slice of metav1.Condition is stored.

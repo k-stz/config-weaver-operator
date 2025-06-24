@@ -14,7 +14,10 @@ The `config-weaver-operator` simplifies configuration management by automaticall
 - [x] .Status: imlement tracking significant state transitions with .status.Conditions; implement at least the "Ready" state
 - [ ] Log levels: ensure logs for state transitions use verbosity level also matches the details level. For example r.Update() should be logged at low verbosity but entering a function at high verbosity
 - [ ] Inspect when DeepCopy() is necessary: For example when concurrent Reconciliation take place and concurrent process A executes an r.Get() fetching the object state from the K8s API and then an r.Updates() does it get written to a cache shared between other concurrent goroutines? Such that if process B executes an r.Get() does it feath instead process A's altered memory from the cache, leading to an unintendet state?
-- [x] Testing: Inspect testing framework capability and implement some tests for the controller, derive goals from that => implemented tests for essential contractual behaviour with regards to ConfigMap syncing using the `Ginkgo` framework  (see notes.md `### Implemented Testcases`)
+
+Testing: 
+- [x] Inspect testing framework capability and implement some tests for the controller, derive goals from that => implemented tests for essential contractual behaviour with regards to ConfigMap syncing using the `Ginkgo` framework  (see notes.md `### Implemented Testcases`)
+- [ ] add a usecase for the multitenancy capabiltiy to, (`envtest`` allows to test RBAC?) Writing a test where both a serviceaccount with missing and sufficient privileges attempts to sync ConfigMaps across namespaces. 
 
 Deployment:
 - [ ] Deploy in cluster pod
@@ -22,12 +25,46 @@ Deployment:
 - [ ] Deploy as olm operator bundle
 
 Security:
-- [ ] Multitenancy: Can the operator be namespaced and run only in a subset of namespaces. Such that differnt users in the same cluster can't tamper with each otherss namespaces and configmaps?
-  - [ ]: Research SAR (Subject Access review) suitability with practical use => Used for Authorization access review in Kubernetes. Can be used to query what actions a serviceaccount is allowed to do against the kube-apiserver API. Use `LocalSubjectAccessReview` to co-locate a namespaced ConfigMapSync-Object with the serviceaccount on which behalf configmaps will be synced across namespaces. 
-  - [ ]: implement namespaced `ConfigMapSync`
-  - [ ]: allow providing ServiceAccount on which behalv configmap Syncing will be allowed.
-  - [ ]: default/impute the ServiceAccount "default" => maybe this is a usecase for the WebhookServer!
-  - [ ]: Extend Ginkgo Test for this usecase, (envtest allows to test RBAC?) Writing a test where both a serviceaccount with missing and sufficient privileges is provided 
+- [ ] Multitenancy: Can the operator be namespaced and run only in a subset of namespaces. Such that different users in the same cluster can't tamper with each others namespaces and ConfigMap?
+  - [x] Research SAR (Subject Access review) suitability with practical use => Used for Authorization access review in Kubernetes. Can be used to query what actions a serviceaccount is allowed to do against the kube-apiserver API. Use `SubjectAccessReview` to co-locate a namespaced ConfigMapSync-Object with the serviceaccount on whose behalf configmaps will be synced across namespaces (I think Local SARs are unsuitable as we need to check authorizing actions for the target sync namespaces).
+  - [ ] implement namespaced `ConfigMapSync`
+  - [x] Figure out if SAR is needed on each reconciliation or if token yielded via TokenRequest will always have the same RBAC as the associated SA. => Use SAR for better UX informing user via events or status.conditions why a given SA has insufficient rights! Use `TokenReuqest` to create a bouded token from a given serviceaccount (`.spec.serviceaccount`) on whose behalf reconciliation will take place for true multitenancy! I think using SARs for prevalidation to reissue TokenRequeset just-in-time is not necessary.
+  - [ ] allow providing ServiceAccount on which behalf ConfigMap syncing will be allowed.
+  - [ ] default/impute the ServiceAccount "default" => maybe this is a usecase for the WebhookServer!
+  - [ ] Cache Serviceaccount TokenRequest tokens using a thread-safe (because reconciliation can be concurrent) keyed map by `namespace/name` of the ConfigMapSync CR, as this will be unique, because it's namespaces. This can be apparently stored in the Reconcile struct as this is shared among the concurrent goroutines. Auto-renew on expiration (lazy, on-demand: so if not found => do TokenRequest and write in thread-safe map). Example implementation:
+   ```go
+func NewTokenCache() *TokenCache {
+    return &TokenCache{
+        tokens: make(map[string]tokenEntry),
+    }
+}
+
+func (c *TokenCache) Get(key string) (string, bool) {
+    c.mu.RLock()  // hopefully contention/lock is only per-key not whole map
+    defer c.mu.RUnlock()
+
+    entry, ok := c.tokens[key]
+    if !ok  {
+        return "", false // not present => Do TokenReview
+    }
+    return entry.token, true
+}
+
+func (c *TokenCache) Set(key, token string) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
+    // For huge clusters a goroutine could prune old key based on a expire timestamp that
+    // we could store together with the token in the tokenEntry
+    c.tokens[key] = tokenEntry{
+        token:     token,
+    }
+}
+   ```
+  - [ ] Garbage Collection: When `ConfigMapSync` is namespaced, owernRef isn't possible. Need to implement GC via finalizer. For this track ownership via a label or annotation e.g. `configmapsync.owern=<namespace>/<name>`
+  - [ ] Document this ownership clearly for users
+  - [ ] add .status.Condition for failing SARs; to clearly and "loudly" inform user if SA has insufficient rights, plus controller Logs and maybe even Events on the CR. Something like "SA X in namespace Y cannot create ConfigMap in namespace Z" 
+
 
 
 Metrics
