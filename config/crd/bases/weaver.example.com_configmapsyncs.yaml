@@ -15,7 +15,7 @@ spec:
     - cms
     - cmsync
     singular: configmapsync
-  scope: Cluster
+  scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
@@ -55,7 +55,7 @@ spec:
               sourceNamespace:
                 type: string
               syncToNamespaces:
-                description: Lis of namespaces to sync Source Namespace to
+                description: List of namespaces to sync Source Namespace to
                 items:
                   type: string
                 type: array

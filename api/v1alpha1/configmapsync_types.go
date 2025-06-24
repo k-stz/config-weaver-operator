@@ -35,7 +35,7 @@ type ConfigMapSyncSpec struct {
 	SourceNamespace string `json:"sourceNamespace,omitempty"`
 	// Name of ConfigMap and its namespace that should be synced
 	Source Source `json:"source,omitempty"`
-	// Lis of namespaces to sync Source Namespace to
+	// List of namespaces to sync Source Namespace to
 	SyncToNamespaces []string `json:"syncToNamespaces,omitempty"`
 
 	// Others
@@ -67,7 +67,7 @@ type ConfigMapSyncStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,path=configmapsyncs,shortName=cms;cmsync
+// +kubebuilder:resource:scope=Namespaced,path=configmapsyncs,shortName=cms;cmsync
 // enables the "/status" subresource on a CRD.
 // ConfigMapSync is the Schema for the configmapsyncs API
 type ConfigMapSync struct {

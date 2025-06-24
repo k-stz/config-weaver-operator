@@ -27,9 +27,12 @@ Deployment:
 Security:
 - [ ] Multitenancy: Can the operator be namespaced and run only in a subset of namespaces. Such that different users in the same cluster can't tamper with each others namespaces and ConfigMap?
   - [x] Research SAR (Subject Access review) suitability with practical use => Used for Authorization access review in Kubernetes. Can be used to query what actions a serviceaccount is allowed to do against the kube-apiserver API. Use `SubjectAccessReview` to co-locate a namespaced ConfigMapSync-Object with the serviceaccount on whose behalf configmaps will be synced across namespaces (I think Local SARs are unsuitable as we need to check authorizing actions for the target sync namespaces).
-  - [ ] implement namespaced `ConfigMapSync`
-  - [x] Figure out if SAR is needed on each reconciliation or if token yielded via TokenRequest will always have the same RBAC as the associated SA. => Use SAR for better UX informing user via events or status.conditions why a given SA has insufficient rights! Use `TokenReuqest` to create a bouded token from a given serviceaccount (`.spec.serviceaccount`) on whose behalf reconciliation will take place for true multitenancy! I think using SARs for prevalidation to reissue TokenRequeset just-in-time is not necessary.
-  - [ ] allow providing ServiceAccount on which behalf ConfigMap syncing will be allowed.
+  - [x] implement namespaced `ConfigMapSync`
+  - [ ] implement watch on source/target ConfigMaps that are outside of ConfigMapSync's namespace! Look into watches with custom handlers, (something with `handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request` ... ). the watch shall be base on a label/annotation. See the GC label/annotation proposal
+- [ ] Garbage Collection: When `ConfigMapSync` is namespaced, owernRef isn't possible. Need to implement GC via finalizer. For this track ownership via a label or annotation e.g. `configmapsync.owern=<namespace>/<name>`
+- [ ] Document this ownership clearly for users
+- [x] Figure out if SAR is needed on each reconciliation or if token yielded via TokenRequest will always have the same RBAC as the associated SA. => Use SAR for better UX informing user via events or status.conditions why a given SA has insufficient rights! Use `TokenReuqest` to create a bouded token from a given serviceaccount (`.spec.serviceaccount`) on whose behalf reconciliation will take place for true multitenancy! I think using SARs for prevalidation to reissue TokenRequeset just-in-time is not necessary.
+  - [ ] allow specifying a ServiceAccount on whose behalf ConfigMap syncing will be allowed.
   - [ ] default/impute the ServiceAccount "default" => maybe this is a usecase for the WebhookServer!
   - [ ] Cache Serviceaccount TokenRequest tokens using a thread-safe (because reconciliation can be concurrent) keyed map by `namespace/name` of the ConfigMapSync CR, as this will be unique, because it's namespaces. This can be apparently stored in the Reconcile struct as this is shared among the concurrent goroutines. Auto-renew on expiration (lazy, on-demand: so if not found => do TokenRequest and write in thread-safe map). Example implementation:
 
@@ -62,10 +65,7 @@ func (c *TokenCache) Set(key, token string) {
     }
 }
 ```
-
-- [ ] Garbage Collection: When `ConfigMapSync` is namespaced, owernRef isn't possible. Need to implement GC via finalizer. For this track ownership via a label or annotation e.g. `configmapsync.owern=<namespace>/<name>`
-  - [ ] Document this ownership clearly for users
-  - [ ] add .status.Condition for failing SARs; to clearly and "loudly" inform user if SA has insufficient rights, plus controller Logs and maybe even Events on the CR. Something like "SA X in namespace Y cannot create ConfigMap in namespace Z" 
+- [ ] add .status.Condition for failing SARs; to clearly and "loudly" inform user if SA has insufficient rights, plus controller Logs and maybe even Events on the CR. Something like "SA X in namespace Y cannot create ConfigMap in namespace Z" 
 
 
 

@@ -38,10 +38,11 @@ var _ = Describe("ConfigMapSync Controller", func() {
 
 		// CMS setup
 		namespacedNameCMS := types.NamespacedName{
-			Name: "ginkgo-test-cms",
-			//Namespace: "default", // clusterscoped
+			Name:      "ginkgo-test-cms",
+			Namespace: "default", // clusterscoped
 		}
 		cmsName := namespacedNameCMS.Name
+		cmsNamespace := namespacedNameCMS.Namespace
 		objectCMS := &weaverv1alpha1.ConfigMapSync{}
 
 		// source CM setup
@@ -78,13 +79,13 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating the custom resource for the Kind ConfigMapSync named ", cmsName))
+			By(fmt.Sprint("creating the custom resource for the Kind ConfigMapSync ", cmsNamespace+"/"+cmsName))
 			err = k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
 			if err != nil && errors.IsNotFound(err) {
 				objectCMS := &weaverv1alpha1.ConfigMapSync{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: cmsName,
-						// Namespace: "default",
+						Name:      cmsName,
+						Namespace: cmsNamespace,
 					},
 					Spec: weaverv1alpha1.ConfigMapSyncSpec{
 						Source: weaverv1alpha1.Source{

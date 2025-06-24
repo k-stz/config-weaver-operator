@@ -258,6 +258,38 @@ Possible Solutions:
 ### Analyzing cluster-logging-forwarder operator implementation
 repo: ` https://github.com/openshift/cluster-logging-operator`
 
+Uses `ReconcileServiceAccountTokenSecret()` that creates a service-account-token secret for a given ServiceAccount. This injects a token key that contains a long-lived token into the secrets, this is a kubernetes feature. 
+```go
+// cluster-logging-operator/internal/auth/service_account.go
+func ReconcileServiceAccountTokenSecret(sa *corev1.ServiceAccount, k8sClient client.Client, namespace, name string, owner metav1.OwnerReference) (desired *corev1.Secret, err error) {
+
+	if sa == nil {
+		return nil, fmt.Errorf("serviceAccount not provided in-order to generate a token")
+	}
+
+	desired = runtime.NewSecret(namespace, name, map[string][]byte{})
+	desired.Annotations = map[string]string{
+		corev1.ServiceAccountNameKey: sa.Name,
+		corev1.ServiceAccountUIDKey:  string(sa.UID),
+	}
+	desired.Type = corev1.SecretTypeServiceAccountToken
+	utils.AddOwnerRefToObject(desired, owner)
+	current := &corev1.Secret{}
+	if err = k8sClient.Get(context.TODO(), client.ObjectKeyFromObject(desired), current); err == nil {
+		return current, nil
+	} else if !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get %s token secret: %w", name, err)
+	}
+
+	if err := k8sClient.Create(context.TODO(), desired); err != nil {
+		return nil, fmt.Errorf("failed to create %s token secret: %w", name, err)
+	}
+
+	return desired, nil
+}
+
+```
+Where is this called? In the `cluster-logging-operator/internal/controller/observability/collector.go` 
 
 
 ## ConfigMapSync: Conditations
@@ -435,4 +467,7 @@ The following test cases are implemented to prove the basic contract that the Co
   - [x] Cleanup the source ConfigMap
   - [x] Cleanup the sample ConfigMapSync referencing the source ConfigMap, without Error
 
+### Example of Testsuite aiding development
+- When switching form Cluster-scoped to namespace scoped, the loudly failed saying the codemarker must be `Namespaced` (not just `Namespace`)
+- then it informed me that the testcode doesn't set the namespace of the ConfigMapSync resource
 
