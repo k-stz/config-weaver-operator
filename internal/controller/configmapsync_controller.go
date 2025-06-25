@@ -359,7 +359,7 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Add/Update/Delete events
 		For(&weaverv1alpha1.ConfigMapSync{}).
 		// Watch the ConfigMap managed by the ConfigMapSync controller , also
-		// triggereing reconciliation
+		// triggering reconciliation
 		// Ah this only works when an ownerReference is set for the configmap! Only then the
 		// watch gets triggered
 		Owns(&v1.ConfigMap{}).
