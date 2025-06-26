@@ -496,3 +496,11 @@ What are the advantages of "not polling periodically" best-practice?
 - more responsive, this also aligns with KUbernetes' event-triggered architecture
 
 That being said, most ontrollers also implement periodic resync, to guard against missed edges (e.g. through network partitioning). These are rare but important for robustness, and I know many tails were this lead to "magical" self-healing behaviour of the overall state of the cluster.
+
+So now to the solution, how can we configure the watch mechanism. (For reference: https://book.kubebuilder.io/reference/watching-resources/secondary-resources-not-owned ). 
+
+
+
+
+
+

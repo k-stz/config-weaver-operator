@@ -28,11 +28,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controller "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // Represents staet of a single reconciliation run
@@ -358,11 +361,38 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Watch ConfigMapSync CR and trigger reconciliation on
 		// Add/Update/Delete events
 		For(&weaverv1alpha1.ConfigMapSync{}).
+		// Problem: this no longer works for configmaps in namespaces other then the configmapsync object
 		// Watch the ConfigMap managed by the ConfigMapSync controller , also
 		// triggering reconciliation
 		// Ah this only works when an ownerReference is set for the configmap! Only then the
 		// watch gets triggered
-		Owns(&v1.ConfigMap{}).
+		//Owns(&v1.ConfigMap{}).
+		//		WatchesRawSource(object client.Object, eventHandler handler.TypedEventHandler[client.Object, reconcile.Request], opts ...builder.WatchesOption)
+		Watches(&v1.ConfigMap{}, // watch ConfigMaps
+			// This allows us to provide a function and implement the mapping between an event
+			// and which Reconciler shall receive it! This is exactly what we need!
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				// This function runs on every event on of a ConfigMap in the cluster. So next
+				// We want it to only trigger on specific ConfigMaps, namely those synced
+				// by our controller! TODO for now hardcoded to sample controller
+				// use the value of the label to find the proper configmapsync-reconciler instance!
+				if val, ok := obj.GetLabels()["cmsOwned"]; ok && val == "true" {
+					return []reconcile.Request{
+						{
+							// so the reconcile needs to know for WHICH configmapsync the
+							// reconciliation shall be triggered. That's why we need a reference on
+							// the configmap that points BACK to the configmapsync object!
+							NamespacedName: types.NamespacedName{
+								Name:      "configmapsync-sample", // Reconcile the associated BackupBusybox resource
+								Namespace: "default",              //obj.GetNamespace(), // Use the namespace of the changed Busybox
+							},
+						},
+					}
+				}
+				// If the label is not present or doesn't match, don't trigger reconciliation!
+				return []reconcile.Request{} // = don't trigger reconcile!
+			}),
+		).
 		// You can set many more options here, for example the number
 		// of concurrent reconciles (default is one) with:
 		WithOptions(controller.Options{MaxConcurrentReconciles: 0}).
