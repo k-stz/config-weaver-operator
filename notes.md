@@ -476,10 +476,23 @@ THe primary resource `ConfigMapSync` was clusterscoped and it described for the 
 - When switching form Cluster-scoped to namespace scoped, the `envtest`-testsuite loudly failed stating that the codemarker  must be `Namespaced` (not `Namespace` as was the typo) for the ConfigMapSync struct. Updated codemark: `//+kubebuilder:resource:scope=Namespaced,path=configmapsyncs,shortName=cms;cmsync`
 - then it informed me that the testcode doesn't set the namespace of the ConfigMapSync resource
 
-## Adjust Watches for cross-namespace secondary resources
-Documentation: https://book.kubebuilder.io/reference/watching-resources
+## Adjust Watches for cross-namespace managed resources
+The kubebuilder book will is referenced in this section: https://book.kubebuilder.io/reference/watching-resources
 
-Inititally the `ConfigMapSync`  - the so-called  **"Primary Resource"** of our controller - was clusterscoped and the ConfigMaps that it synced were owned by it using an OwnerReference. The `OwnerReference` on the Object under `.metadata.ownerReference` is used for garbage collection (deleting the owner, also deletes the owned resource) and is set explicitly via controller logic. Secondly the owner reference can be comfortably used as the hook for watches, such that when the owned resource changes the primary resource controller gets a watch event triggering its reconciliation. As you might imagine that's a desired feature in this operator.
+Inititally the `ConfigMapSync`  - the so-called  **"Primary Resource"** of our controller - was clusterscoped and the ConfigMaps that it synced were owned by it using an `OwnerReference`. The `OwnerReference` on the Object under `.metadata.ownerReference` is used for garbage collection (deleting the owner, also deletes the owned resource) and is set explicitly via ConfigMapSync- controller logic. Secondly the OwnerReference can be comfortably used as the hook for watches, such that when the owned resource changes the primary resource controller gets a watch event triggering its reconciliation. 
 
-The problem is that owned resource can only trigger watch events when they are owned by a clusterscoped primary resource or in the same namespace, as a namespaced resource. But that is no longer the case and, furthermore, our primary resource syncs configmaps across namespaces, thus it will never be co-located with all configmaps namespaces. We need a new watch mechanism. For this the Kubebuilder framework documentation has a section describing how to watch resources "which are NOT Owned by the Controller" that we can use. 
+As you might imagine, failure to notice changes to a managed ConfigMap leads to inconsistency and hinders self-healing. The ConfigMaps might get out of sync up until a primary resource finally triggers reconciliation of our controller. Thus we need reconciliation to trigger also on changes to any of our managed ConfigMaps.
 
+The problem is that owned resource can only trigger watch events when they are owned by a clusterscoped primary resource or in the same namespace, as a namespaced resource. But that is no longer the case and, furthermore, our primary resource sync across namespaces, thus it will never be collocated with configmaps in other namespaces. 
+
+> In summary, we need reconciliation to trigger for `ConfigMaps` that are **outside** the `ConfigMapSync`'s namespace! 
+
+So we need a new Watch mechanism. For this the kubebuilder framework documentation has a section describing how to watch resources "which are NOT Owned by the Controller" that we can lean on. 
+
+But first, why don't we simply trigger reconciliation manually periodically every X seconds? This question is addressed by the kubebuilder book starting with a best practice stance "Kubernetes controllers are fundamentally event-driven". But I think the more precise formulation is "event-tiggered and level-driven" which boils down to the reconciliation-Loop being triggered by a create/update/delete event, NOT its content, and instead the logic then polls the state of the object. That is: we query "at what level the object is" (=> thus level-driven!) instead on focusing on the event itself, we focus on the intent in the `.spec` and attempt to reconcile it.
+
+What are the advantages of "not polling periodically" best-practice?
+- more efficient/performant: the system takes action when necessary, instead of on a fixed interval
+- more responsive, this also aligns with KUbernetes' event-triggered architecture
+
+That being said, most ontrollers also implement periodic resync, to guard against missed edges (e.g. through network partitioning). These are rare but important for robustness, and I know many tails were this lead to "magical" self-healing behaviour of the overall state of the cluster.
