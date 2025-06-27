@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strconv"
 
 	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
@@ -33,8 +34,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controller "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -355,6 +358,39 @@ func (r *ConfigMapSyncReconciler) setOwnerRef(owner *v1alpha1.ConfigMapSync, cm 
 	return nil
 }
 
+// Triggers reconciliation only on UPDATE events AND when the ConfigMaps Data fields changed!
+// Triggers reconciliation for all events, except for Updates, here it triggers only when
+// the data field changed. Use it in
+var updatePredConfigMap predicate.Funcs = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldObj := e.ObjectOld.(*v1.ConfigMap)
+		newObj := e.ObjectNew.(*v1.ConfigMap)
+
+		// Trigger reconciliation only ConfigMap Data changes
+		changed := maps.Equal(oldObj.Data, newObj.Data)
+		//fmt.Println("## change event for", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
+		if !changed {
+			return true
+		}
+		return false
+	},
+
+	// Allow create events
+	CreateFunc: func(e event.CreateEvent) bool {
+		return true
+	},
+
+	// Allow delete events
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		return true
+	},
+
+	// Allow generic events (e.g., external triggers)
+	GenericFunc: func(e event.GenericEvent) bool {
+		return true
+	},
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -376,6 +412,23 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// We want it to only trigger on specific ConfigMaps, namely those synced
 				// by our controller! TODO for now hardcoded to sample controller
 				// use the value of the label to find the proper configmapsync-reconciler instance!
+				annotations := obj.GetAnnotations()
+				name, nameOk := annotations["configmapsync-owner/name"]
+				namespace, nsOk := annotations["configmapsync-owner/namespace"]
+
+				if nameOk && nsOk {
+					return []reconcile.Request{
+						{
+							// maps the watched event the reconciler of specified object!
+							NamespacedName: types.NamespacedName{
+								Name:      name,      // Reconcile the associated BackupBusybox resource
+								Namespace: namespace, //obj.GetNamespace(), // Use the namespace of the changed Busybox
+							},
+						},
+					}
+				}
+
+				// Fallback, remove once above works
 				if val, ok := obj.GetLabels()["cmsOwned"]; ok && val == "true" {
 					return []reconcile.Request{
 						{
@@ -392,7 +445,10 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// If the label is not present or doesn't match, don't trigger reconciliation!
 				return []reconcile.Request{} // = don't trigger reconcile!
 			}),
+			// Predicate for efficiency
+			// builder.WithPredicates(updatePredConfigMap)
 		).
+
 		// You can set many more options here, for example the number
 		// of concurrent reconciles (default is one) with:
 		WithOptions(controller.Options{MaxConcurrentReconciles: 0}).
