@@ -476,7 +476,7 @@ THe primary resource `ConfigMapSync` was clusterscoped and it described for the 
 - When switching form Cluster-scoped to namespace scoped, the `envtest`-testsuite loudly failed stating that the codemarker  must be `Namespaced` (not `Namespace` as was the typo) for the ConfigMapSync struct. Updated codemark: `//+kubebuilder:resource:scope=Namespaced,path=configmapsyncs,shortName=cms;cmsync`
 - then it informed me that the testcode doesn't set the namespace of the ConfigMapSync resource
 
-## Adjust Watches for cross-namespace managed resources
+### Adjust Watches for cross-namespace managed resources
 The kubebuilder book will is referenced in this section: https://book.kubebuilder.io/reference/watching-resources
 
 Inititally the `ConfigMapSync`  - the so-called  **"Primary Resource"** of our controller - was clusterscoped and the ConfigMaps that it synced were owned by it using an `OwnerReference`. The `OwnerReference` on the Object under `.metadata.ownerReference` is used for garbage collection (deleting the owner, also deletes the owned resource) and is set explicitly via ConfigMapSync- controller logic. Secondly the OwnerReference can be comfortably used as the hook for watches, such that when the owned resource changes the primary resource controller gets a watch event triggering its reconciliation. 
@@ -604,3 +604,9 @@ func (r *ReconcileArgoCD) clusterResourceMapper(ctx context.Context, o client.Ob
 }
 ```
 
+
+
+## ConfigMapSync namespaced serviecaccount authority
+For the next piece in multitenancy architecture we will constrain the authority of a namespaced `ConfigMapSync` (`CMS`) object to a given serviceaccount. The serviceaccount must be colocated with the `CMS` providing an intuitive RBAC logic, that if a user has access to a namespace and can create `CMS` in it, the user can also access any serviceaccount in the namespace and thus take actions on behalf of the authority granted to the servieaccount.
+
+First lets allow our `ConfigMapSync` to refernce a servcieaccount

@@ -38,6 +38,12 @@ type ConfigMapSyncSpec struct {
 	// List of namespaces to sync Source Namespace to
 	SyncToNamespaces []string `json:"syncToNamespaces,omitempty"`
 
+	// ServiceAccount points to the ServiceAccount resource used to sync ConfigMaps. This is to provide multitenancy, constraining the authority of the syncing to the RBAC access of the given namespaced ServiceAccount
+	//
+	// +kubebuilder:validation:Required
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service Account"
+	ServiceAccount ServiceAccount `json:"serviceAccount"`
+
 	// Others
 	// syncOptions.prune: true
 	// syncOptions.forceUpdate: true
@@ -46,6 +52,14 @@ type ConfigMapSyncSpec struct {
 	//onUpdate: true        # Optional: whether to sync when the source is updated
 	//onDelete: false
 
+}
+
+type ServiceAccount struct {
+	// Name of the ServiceAccount to use to sync ConfigMaps. The ServiceAccount is created by the administrator
+	//
+	// +kubebuilder:validation:Pattern:="^[a-z][a-z0-9-]{2,62}[a-z0-9]$"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="ServiceAccount Name",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
+	Name string `json:"name"`
 }
 
 type Source struct {
