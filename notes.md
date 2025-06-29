@@ -500,7 +500,31 @@ That being said, most ontrollers also implement periodic resync, to guard agains
 So now to the solution, how can we configure the watch mechanism. (For reference: https://book.kubebuilder.io/reference/watching-resources/secondary-resources-not-owned ). 
 
 
+### ArgoCD Operator
+Does the resource mapping via annotation:
+CR-mapping
 
+```go
+// source https://github.com/argoproj-labs/argocd-operator/blob/655113a17854883a9fe3f6a7315c14a1bc4bca35/controllers/argocd/custommapper.go#L18C1-L38C2
+func (r *ReconcileArgoCD) clusterResourceMapper(ctx context.Context, o client.Object) []reconcile.Request {
+	crbAnnotations := o.GetAnnotations()
+	namespacedArgoCDObject := client.ObjectKey{}
 
+	for k, v := range crbAnnotations {
+		if k == common.AnnotationName {
+			namespacedArgoCDObject.Name = v
+		} else if k == common.AnnotationNamespace {
+			namespacedArgoCDObject.Namespace = v
+		}
+	}
 
+	var result = []reconcile.Request{}
+	if namespacedArgoCDObject.Name != "" && namespacedArgoCDObject.Namespace != "" {
+		result = []reconcile.Request{
+			{NamespacedName: namespacedArgoCDObject}, // <- Requests takes NamespacedName directly!
+		}
+	}
+	return result
+}
+```
 

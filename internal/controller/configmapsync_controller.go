@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -259,6 +260,8 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 		log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
 	}
 
+	r.setOwnerMetadata(configMapSync, sourceCM)
+
 	if err := r.Update(ctx, sourceCM); err != nil {
 		log.Error(err, "Failed setting OwnerRef on Source ConfigMap")
 	}
@@ -358,9 +361,34 @@ func (r *ConfigMapSyncReconciler) setOwnerRef(owner *v1alpha1.ConfigMapSync, cm 
 	return nil
 }
 
+// Sets Annotation/label on ConfigMap pointing to the ConfigMapSync Object that manages it.
+// This is used in the Watch request-enqueue-logic to trigger reconciliation on the ConfigMap
+// by reconciling the ConfigMapSync that is written in the Annotation or Labels set here
+//
+// setOwnerRef doesn't work anymore for namespaced ConfigMapSync, we need the a custom
+// kubebuilder-watcher, which in turn needs this auxiiliary reference via labels/annnotations
+// to back refernce a configmap to the namespace and name of the owning ConfigMapSync
+//
+// Isn't the labels/annotations, only set, you need to call Update separately!
+func (r *ConfigMapSyncReconciler) setOwnerMetadata(associatedCMS *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) {
+	name := associatedCMS.GetName()
+	namespace := associatedCMS.GetNamespace()
+	namespacedName := types.NamespacedName{
+		Name:      name,
+		Namespace: namespace,
+	}
+	cm.GetAnnotations()["configmapsync.io/name"] = name
+	cm.GetAnnotations()["configmapsync.io/namespace"] = namespace
+
+	cm.GetLabels()["configmapsync.io/owner"] = namespacedName.String() // NamespacedName format
+}
+
 // Triggers reconciliation only on UPDATE events AND when the ConfigMaps Data fields changed!
 // Triggers reconciliation for all events, except for Updates, here it triggers only when
 // the data field changed. Use it in
+//
+// Decided to use Filtering based on labels so client filtering on label is possible
+// for debugging and anlysis (kubectl get cm -l configmapsync.io.ownership)
 var updatePredConfigMap predicate.Funcs = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		oldObj := e.ObjectOld.(*v1.ConfigMap)
@@ -369,9 +397,18 @@ var updatePredConfigMap predicate.Funcs = predicate.Funcs{
 		// Trigger reconciliation only ConfigMap Data changes
 		changed := maps.Equal(oldObj.Data, newObj.Data)
 		//fmt.Println("## change event for", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
+		if val, ok := e.ObjectOld.GetLabels()["skip"]; ok && val == "true" {
+			fmt.Println("## Filtered out by Predicate because skip=true label set! ")
+			fmt.Println("## ", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
+
+			return false
+		}
 		if !changed {
 			return true
 		}
+		fmt.Println("## predicate filtered out event because .data field didn't change! ")
+		fmt.Println("## ", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
+
 		return false
 	},
 
@@ -419,7 +456,7 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				if nameOk && nsOk {
 					return []reconcile.Request{
 						{
-							// maps the watched event the reconciler of specified object!
+							// maps the watcghed event the reconciler of specified object!
 							NamespacedName: types.NamespacedName{
 								Name:      name,      // Reconcile the associated BackupBusybox resource
 								Namespace: namespace, //obj.GetNamespace(), // Use the namespace of the changed Busybox
@@ -430,6 +467,7 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 				// Fallback, remove once above works
 				if val, ok := obj.GetLabels()["cmsOwned"]; ok && val == "true" {
+					fmt.Println("## Enqueueing request because label cmsOwned=true set!")
 					return []reconcile.Request{
 						{
 							// so the reconcile needs to know for WHICH configmapsync the
@@ -446,7 +484,7 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return []reconcile.Request{} // = don't trigger reconcile!
 			}),
 			// Predicate for efficiency
-			// builder.WithPredicates(updatePredConfigMap)
+			builder.WithPredicates(updatePredConfigMap),
 		).
 
 		// You can set many more options here, for example the number
