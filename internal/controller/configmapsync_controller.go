@@ -256,14 +256,16 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 		return nil, err
 	}
 	r.RunState.sourceConfigMapFound = true
-	if err := r.setOwnerRef(configMapSync, sourceCM); err != nil {
-		log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
-	}
+	// Not possible to set on namespaced object
+	// if err := r.setOwnerRef(configMapSync, sourceCM); err != nil {
+	// 	log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
+	// }
 
 	r.setOwnerMetadata(configMapSync, sourceCM)
+	fmt.Println("## setOwnerMetadata on sourceCM", sourceCM)
 
 	if err := r.Update(ctx, sourceCM); err != nil {
-		log.Error(err, "Failed setting OwnerRef on Source ConfigMap")
+		log.Error(err, "Failed setting OwnerRef and OwnerMetadata on Source ConfigMap")
 	}
 	return sourceCM, nil
 }
@@ -352,6 +354,7 @@ func (r *ConfigMapSyncReconciler) getSourceConfigMap(ctx context.Context, cms *v
 // Deciding against setting owner reference, as the ConifgMapSync will be namespaced for
 // easier Multitenancy implementaiton. Instead, if a cross-namespace GC is needed, it can
 // be implemented by the controller by using a magic label that all synced namespaces can share
+// Updating an object with an ownerRef that has a namespaced owner will fail
 func (r *ConfigMapSyncReconciler) setOwnerRef(owner *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) error {
 	//	log := log.FromContext(ctx).WithName("setOwnerRef")
 
@@ -377,10 +380,12 @@ func (r *ConfigMapSyncReconciler) setOwnerMetadata(associatedCMS *v1alpha1.Confi
 		Name:      name,
 		Namespace: namespace,
 	}
-	cm.GetAnnotations()["configmapsync.io/name"] = name
-	cm.GetAnnotations()["configmapsync.io/namespace"] = namespace
+	// set "soft-links" pointing to owning CMS object
+	cm.GetAnnotations()["configmapsync.io/owner-name"] = name
+	cm.GetAnnotations()["configmapsync.io/owner-namespace"] = namespace
 
-	cm.GetLabels()["configmapsync.io/owner"] = namespacedName.String() // NamespacedName format
+	cm.GetLabels()["cmsOwnerNamespace"] = namespacedName.Namespace
+	cm.GetLabels()["cmsOwnerName"] = namespacedName.Name
 }
 
 // Triggers reconciliation only on UPDATE events AND when the ConfigMaps Data fields changed!
@@ -450,13 +455,15 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// by our controller! TODO for now hardcoded to sample controller
 				// use the value of the label to find the proper configmapsync-reconciler instance!
 				annotations := obj.GetAnnotations()
-				name, nameOk := annotations["configmapsync-owner/name"]
-				namespace, nsOk := annotations["configmapsync-owner/namespace"]
+				name, nameOk := annotations["configmapsync.io/owner-name"]
+				namespace, nsOk := annotations["configmapsync.io/owner-name"]
 
 				if nameOk && nsOk {
+					fmt.Println("## Enqueueing using new annotation works, name/ns", name, "/", namespace)
+
 					return []reconcile.Request{
 						{
-							// maps the watcghed event the reconciler of specified object!
+							// maps the watched event the reconciler of specified object!
 							NamespacedName: types.NamespacedName{
 								Name:      name,      // Reconcile the associated BackupBusybox resource
 								Namespace: namespace, //obj.GetNamespace(), // Use the namespace of the changed Busybox
@@ -466,8 +473,8 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 
 				// Fallback, remove once above works
-				if val, ok := obj.GetLabels()["cmsOwned"]; ok && val == "true" {
-					fmt.Println("## Enqueueing request because label cmsOwned=true set!")
+				if val, ok := obj.GetLabels()["cmsOwner"]; ok && val != "" {
+					fmt.Println("## Enqueueing request because label cmsOwner is set to", val)
 					return []reconcile.Request{
 						{
 							// so the reconcile needs to know for WHICH configmapsync the
