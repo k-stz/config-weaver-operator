@@ -415,16 +415,15 @@ var updatePredConfigMap predicate.Funcs = predicate.Funcs{
 
 		// Trigger reconciliation only ConfigMap Data changes
 		changed := maps.Equal(oldObj.Data, newObj.Data)
-		//fmt.Println("## change event for", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
 		if val, ok := e.ObjectOld.GetLabels()["skip"]; ok && val == "true" {
-			fmt.Println("## Filtered out by Predicate because skip=true label set! ")
+			fmt.Println("##updatePredConfigMap Predicate: Filtered out event because skip=true label set! ")
 			fmt.Println("## ", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
 			return false
 		}
 		if !changed {
 			return true
 		}
-		fmt.Println("## predicate filtered out event because .data field didn't change!")
+		fmt.Println("##updatePredConfigMap Predicate:  filtered out event because .data field didn't change!")
 		fmt.Println("## ", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
 		return false
 	},
