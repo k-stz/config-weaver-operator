@@ -499,6 +499,82 @@ That being said, most ontrollers also implement periodic resync, to guard agains
 
 So now to the solution, how can we configure the watch mechanism. (For reference: https://book.kubebuilder.io/reference/watching-resources/secondary-resources-not-owned ). 
 
+We adjust the watch configuration on the ctrl.Manager, which was previousy defined to watch on owned resources. Now we can configure custom `Watches` and we provide an event handler `handler.EnqueueRequestsFromMapFunc` which will run for every Watch event on ConfigMaps and implement a mapping for which ConfigMapSync-Object Reconciliation shall be triggered. The mapping logic uses a common controller pattern utilizing two annotation on the ConfigMap:
+- `configmapsync.io/owner-name`
+- `configmapsync.io/owner-namespace`
+both together uniquely identify the ConfigMapSync-Object that manages them. The annotation were added originally when the Reconciliation-Loop first ran and synced the ConfigMaps, were it previously just set the OwnerRefernce it now sets these annotations.
+```go
+// SetupWithManager sets up the controller with the Manager.
+func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&weaverv1alpha1.ConfigMapSync{}).
+		Watches(&v1.ConfigMap{}, // watch ConfigMaps
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				annotations := obj.GetAnnotations()
+				name, nameOk := annotations["configmapsync.io/owner-name"]
+				namespace, nsOk := annotations["configmapsync.io/owner-namespace"]
+				if nameOk && nsOk {
+					return []reconcile.Request{
+						{
+							// maps the watched event the reconciler of specified object!
+							NamespacedName: types.NamespacedName{
+								Name:      name,
+								Namespace: namespace,
+							},
+						},
+					}
+				}
+				// If the label is not present or doesn't match, don't trigger reconciliation!
+				return []reconcile.Request{} // = don't trigger reconcile!
+			}),
+			// Predicate for efficiency
+			builder.WithPredicates(updatePredConfigMap),
+		).
+		Complete(r)
+```
+
+Furthermore, we also provide a kubebuilder predicate on the watch with the third and last paramter to Watches `builder.WithPredicates(updatePredConfigMap)` here we pass a function that is defined below `updatePredConfigMap`, which allows us to _filter_ watch events **before** they are even passed to the `EnqueueRequestsFromMapFunc` request mapper.
+
+In the predicate function we pass all delete and create events along, but for update-events we only pass through those that:
+- have the annotations above (TODO not implemented yet) 
+- and for which the `.data` key was changed.
+
+This greatly reduces the mapping effort later and ensures reconiliation only runs when necessary.
+
+```go
+var updatePredConfigMap predicate.Funcs = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+
+    if ! hasOwnerAnnotations((*v1.ConfigMap)) {
+       return false
+    }
+
+
+		oldObj := e.ObjectOld.(*v1.ConfigMap)
+		newObj := e.ObjectNew.(*v1.ConfigMap)
+		// Trigger reconciliation only ConfigMap Data changes
+		changed := maps.Equal(oldObj.Data, newObj.Data)
+		if !changed {  // only runs when .data field was changed  update event
+			return true
+		}
+		return false
+	},
+	// Allow create events
+	CreateFunc: func(e event.CreateEvent) bool {
+		return true
+	},
+	// Allow delete events
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		return true
+	},
+	// Allow generic events (e.g., external triggers)
+	GenericFunc: func(e event.GenericEvent) bool {
+		return true
+	},
+}
+```
+
+
 
 ### ArgoCD Operator
 Does the resource mapping via annotation:

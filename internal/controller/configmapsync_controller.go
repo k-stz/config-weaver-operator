@@ -405,6 +405,11 @@ func (r *ConfigMapSyncReconciler) setOwnerMetadata(associatedCMS *v1alpha1.Confi
 // for debugging and anlysis (kubectl get cm -l configmapsync.io.ownership)
 var updatePredConfigMap predicate.Funcs = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
+		// TODO maybe also implement this logic?
+		// if ! hasOwnerAnnotations((*v1.ConfigMap)) {
+		// 	return false
+		// }
+
 		oldObj := e.ObjectOld.(*v1.ConfigMap)
 		newObj := e.ObjectNew.(*v1.ConfigMap)
 
@@ -466,30 +471,14 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				namespace, nsOk := annotations["configmapsync.io/owner-namespace"]
 
 				if nameOk && nsOk {
-					fmt.Println("## Enqueueing using new annotation works, name/ns", name, "/", namespace)
-
+					// TODO wrap in debug logs of high level
+					fmt.Println("##EnqueueRequestsFromMapFunc Enqueueing using new annotation works, name/ns", name, "/", namespace)
 					return []reconcile.Request{
 						{
 							// maps the watched event the reconciler of specified object!
 							NamespacedName: types.NamespacedName{
-								Name:      name,      // Reconcile the associated BackupBusybox resource
-								Namespace: namespace, //obj.GetNamespace(), // Use the namespace of the changed Busybox
-							},
-						},
-					}
-				}
-
-				// Fallback, remove once above works
-				if val, ok := obj.GetLabels()["cmsOwner"]; ok && val != "" {
-					fmt.Println("## Enqueueing request because label cmsOwner is set to", val)
-					return []reconcile.Request{
-						{
-							// so the reconcile needs to know for WHICH configmapsync the
-							// reconciliation shall be triggered. That's why we need a reference on
-							// the configmap that points BACK to the configmapsync object!
-							NamespacedName: types.NamespacedName{
-								Name:      "configmapsync-sample", // Reconcile the associated BackupBusybox resource
-								Namespace: "default",              //obj.GetNamespace(), // Use the namespace of the changed Busybox
+								Name:      name,
+								Namespace: namespace,
 							},
 						},
 					}
