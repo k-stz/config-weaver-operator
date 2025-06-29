@@ -265,7 +265,7 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 	fmt.Println("## setOwnerMetadata on sourceCM", sourceCM)
 
 	if err := r.Update(ctx, sourceCM); err != nil {
-		log.Error(err, "Failed setting OwnerRef and OwnerMetadata on Source ConfigMap")
+		log.Error(err, "Failed setting OwnerMetadata on Source ConfigMap")
 	}
 	return sourceCM, nil
 }
@@ -297,9 +297,11 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 			},
 			Data: sourceConfigMap.Data,
 		}
-		if err := r.setOwnerRef(configMapSync, cm); err != nil {
-			log.Error(err, "Failed setting OwnerRef")
-		}
+		// if err := r.setOwnerRef(configMapSync, cm); err != nil {
+		// 	log.Error(err, "Failed setting OwnerRef")
+		// }
+		//r.setOwnerMetadata(configMapSync, cm)
+
 		configMaps = append(configMaps, cm)
 	}
 
@@ -380,12 +382,19 @@ func (r *ConfigMapSyncReconciler) setOwnerMetadata(associatedCMS *v1alpha1.Confi
 		Name:      name,
 		Namespace: namespace,
 	}
-	// set "soft-links" pointing to owning CMS object
+	// Need to catch whether annotations are nil, else assignment will panic
+	if cm.Annotations == nil {
+		cm.Annotations = make(map[string]string)
+	}
 	cm.GetAnnotations()["configmapsync.io/owner-name"] = name
 	cm.GetAnnotations()["configmapsync.io/owner-namespace"] = namespace
-
-	cm.GetLabels()["cmsOwnerNamespace"] = namespacedName.Namespace
+	// Need to catch whether labels are nil, else assignment will panic
+	if cm.Labels == nil {
+		cm.Labels = make(map[string]string)
+	}
 	cm.GetLabels()["cmsOwnerName"] = namespacedName.Name
+	cm.GetLabels()["cmsOwnerNamespace"] = namespacedName.Namespace
+
 }
 
 // Triggers reconciliation only on UPDATE events AND when the ConfigMaps Data fields changed!
@@ -456,7 +465,7 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// use the value of the label to find the proper configmapsync-reconciler instance!
 				annotations := obj.GetAnnotations()
 				name, nameOk := annotations["configmapsync.io/owner-name"]
-				namespace, nsOk := annotations["configmapsync.io/owner-name"]
+				namespace, nsOk := annotations["configmapsync.io/owner-namespace"]
 
 				if nameOk && nsOk {
 					fmt.Println("## Enqueueing using new annotation works, name/ns", name, "/", namespace)
