@@ -300,7 +300,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		// if err := r.setOwnerRef(configMapSync, cm); err != nil {
 		// 	log.Error(err, "Failed setting OwnerRef")
 		// }
-		//r.setOwnerMetadata(configMapSync, cm)
+		r.setOwnerMetadata(configMapSync, cm)
 
 		configMaps = append(configMaps, cm)
 	}
@@ -414,15 +414,13 @@ var updatePredConfigMap predicate.Funcs = predicate.Funcs{
 		if val, ok := e.ObjectOld.GetLabels()["skip"]; ok && val == "true" {
 			fmt.Println("## Filtered out by Predicate because skip=true label set! ")
 			fmt.Println("## ", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
-
 			return false
 		}
 		if !changed {
 			return true
 		}
-		fmt.Println("## predicate filtered out event because .data field didn't change! ")
+		fmt.Println("## predicate filtered out event because .data field didn't change!")
 		fmt.Println("## ", e.ObjectOld.GetName(), "/", e.ObjectOld.GetNamespace())
-
 		return false
 	},
 
@@ -459,10 +457,10 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// This allows us to provide a function and implement the mapping between an event
 			// and which Reconciler shall receive it! This is exactly what we need!
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				// This function runs on every event on of a ConfigMap in the cluster. So next
+				// This function runs on every watch event of a ConfigMap in the cluster
+				// prefiltered by a Predicate.
 				// We want it to only trigger on specific ConfigMaps, namely those synced
-				// by our controller! TODO for now hardcoded to sample controller
-				// use the value of the label to find the proper configmapsync-reconciler instance!
+				// by our controllers!
 				annotations := obj.GetAnnotations()
 				name, nameOk := annotations["configmapsync.io/owner-name"]
 				namespace, nsOk := annotations["configmapsync.io/owner-namespace"]
