@@ -663,3 +663,11 @@ type ConfigMapSyncSpec struct {
 ```
 
 Now the value will be defaulted whenever it is not supplied or deleted.
+
+## Validate the ServiceAccount
+- Check whether the serviceaccount exists in the namespace
+- introduce .status condition for this! "ValidServiceAccount"
+
+## TokenRequest the ServiceAccount
+
+## Perform action on behalf of the ServiceAccount
