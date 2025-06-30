@@ -45,18 +45,16 @@ spec:
             description: ConfigMapSyncSpec defines the desired state of ConfigMapSync
             properties:
               serviceAccount:
-                description: ServiceAccount points to the ServiceAccount resource
-                  used to sync ConfigMaps. This is to provide multitenancy, constraining
-                  the authority of the syncing to the RBAC access of the given namespaced
-                  ServiceAccount
+                description: ServiceAccount points to the namespaced ServiceAccount
+                  that will be used to sync ConfigMaps. This is to provide multitenancy,
+                  constraining the authority of the syncing to the RBAC access of
+                  the given namespaced ServiceAccount
                 properties:
                   name:
                     description: Name of the ServiceAccount to use to sync ConfigMaps.
                       The ServiceAccount is created by the administrator
                     pattern: ^[a-z][a-z0-9-]{2,62}[a-z0-9]$
                     type: string
-                required:
-                - name
                 type: object
               source:
                 description: Name of ConfigMap and its namespace that should be synced
@@ -66,8 +64,6 @@ spec:
                   namespace:
                     type: string
                 type: object
-              sourceNamespace:
-                type: string
               syncToNamespaces:
                 description: List of namespaces to sync Source Namespace to
                 items:
@@ -77,8 +73,6 @@ spec:
                 description: This comment will be used as the description of the field!
                 format: int32
                 type: integer
-            required:
-            - serviceAccount
             type: object
           status:
             description: ConfigMapSyncStatus defines the observed state of ConfigMapSync

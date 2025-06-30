@@ -31,18 +31,17 @@ type ConfigMapSyncSpec struct {
 	// This comment will be used as the description of the field!
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	TestNum int32 `json:"testNum,omitempty"`
-	// +operator-sdk:csv:customresourcedefinitions:type=spec
-	SourceNamespace string `json:"sourceNamespace,omitempty"`
-	// Name of ConfigMap and its namespace that should be synced
-	Source Source `json:"source,omitempty"`
+
+	// ServiceAccount points to the namespaced ServiceAccount that will be used to sync ConfigMaps. This is to provide multitenancy, constraining the authority of the syncing to the RBAC access of the given namespaced ServiceAccount
+	//
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service Account"
+	ServiceAccount ServiceAccount `json:"serviceAccount,omitempty"`
+
 	// List of namespaces to sync Source Namespace to
 	SyncToNamespaces []string `json:"syncToNamespaces,omitempty"`
 
-	// ServiceAccount points to the ServiceAccount resource used to sync ConfigMaps. This is to provide multitenancy, constraining the authority of the syncing to the RBAC access of the given namespaced ServiceAccount
-	//
-	// +kubebuilder:validation:Required
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service Account"
-	ServiceAccount ServiceAccount `json:"serviceAccount"`
+	// Name of ConfigMap and its namespace that should be synced
+	Source Source `json:"source,omitempty"`
 
 	// Others
 	// syncOptions.prune: true
@@ -58,8 +57,7 @@ type ServiceAccount struct {
 	// Name of the ServiceAccount to use to sync ConfigMaps. The ServiceAccount is created by the administrator
 	//
 	// +kubebuilder:validation:Pattern:="^[a-z][a-z0-9-]{2,62}[a-z0-9]$"
-	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="ServiceAccount Name",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 }
 
 type Source struct {

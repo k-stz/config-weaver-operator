@@ -610,3 +610,46 @@ func (r *ReconcileArgoCD) clusterResourceMapper(ctx context.Context, o client.Ob
 For the next piece in multitenancy architecture we will constrain the authority of a namespaced `ConfigMapSync` (`CMS`) object to a given serviceaccount. The serviceaccount must be colocated with the `CMS` providing an intuitive RBAC logic, that if a user has access to a namespace and can create `CMS` in it, the user can also access any serviceaccount in the namespace and thus take actions on behalf of the authority granted to the servieaccount.
 
 First lets allow our `ConfigMapSync` to refernce a servcieaccount
+
+```go
+type ConfigMapSyncSpec struct {
+	// Name of ConfigMap and its namespace that should be synced
+	Source Source `json:"source,omitempty"`
+	// List of namespaces to sync Source Namespace to
+	SyncToNamespaces []string `json:"syncToNamespaces,omitempty"`
+
+	// ServiceAccount points to the namespaced ServiceAccount that will be used to sync ConfigMaps. This is to provide multitenancy, constraining the authority of the syncing to the RBAC access of the given namespaced ServiceAccount
+	//
+	// +kubebuilder:validation:Required
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service Account"
+	ServiceAccount ServiceAccount `json:"serviceAccount"`
+}
+
+type ServiceAccount struct {
+	// Name of the ServiceAccount to use to sync ConfigMaps. The ServiceAccount is created by the administrator
+	//
+	// +kubebuilder:validation:Pattern:="^[a-z][a-z0-9-]{2,62}[a-z0-9]$"
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="ServiceAccount Name",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
+	Name string `json:"name"`
+}
+
+```
+
+First we add the field to the `...Spec` struct and introduce a new struct type `ServiceAccount`. Why not simply use a string? Furthermore this might be considered bad for usability as now we need to set the value like this:
+```yaml
+spec:
+  serviceAccount:
+     name: default
+# instead of simply
+  serviceAccount: default
+```
+and also the user expects more fields and a single "name" field feels probably superfluous.
+
+
+The advantages are as follows:
+- Extensibility: We can later expand the ServieAccount struct with additional fields, for example autoGenerate=bool without breaking the API, which would be the case when switching form a string value to an object value (= struct) 
+- Clearer semantics: the field "name" clearly implies the name of the ServiceAccount, not its token
+
+The next thing I want to stress is that  kubebuilder provides validation via codemarkers to provide a regex pattern that the field must match. See the entry `// +kubebuilder:validation:Pattern:="^[a-z][a-z0-9-]{2,62}[a-z0-9]$"`  This will be baked into the CRD OpenAPI schema and will be enforced by the apimachinery! This ensures serviceaccount will ALWAYS be valid words, alleviating that validation burder from the controller logic. The validation will be done by the kube-apiserver, if it fails it will reject the change and the client issuing it will receive very clear feedback what failed and for what reason - neat!
+
+## Defaulting the ServiceAccount
