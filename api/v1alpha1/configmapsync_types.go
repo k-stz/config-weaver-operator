@@ -32,8 +32,10 @@ type ConfigMapSyncSpec struct {
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	TestNum int32 `json:"testNum,omitempty"`
 
-	// ServiceAccount points to the namespaced ServiceAccount that will be used to sync ConfigMaps. This is to provide multitenancy, constraining the authority of the syncing to the RBAC access of the given namespaced ServiceAccount
+	// ServiceAccount specifies the namespaced Kubernetes ServiceAccount to use when syncing ConfigMaps. The controller performs reconciliation using only the RBAC permissions granted to this ServiceAccount, enabling multitenancy by limiting its authority.
+	// If omitted, the default ServiceAccount in the controller's namespace will be used.
 	//
+	// +kubebuilder:default:={name: "default"}
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service Account"
 	ServiceAccount ServiceAccount `json:"serviceAccount,omitempty"`
 

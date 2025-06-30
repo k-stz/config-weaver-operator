@@ -653,3 +653,13 @@ The advantages are as follows:
 The next thing I want to stress is that  kubebuilder provides validation via codemarkers to provide a regex pattern that the field must match. See the entry `// +kubebuilder:validation:Pattern:="^[a-z][a-z0-9-]{2,62}[a-z0-9]$"`  This will be baked into the CRD OpenAPI schema and will be enforced by the apimachinery! This ensures serviceaccount will ALWAYS be valid words, alleviating that validation burder from the controller logic. The validation will be done by the kube-apiserver, if it fails it will reject the change and the client issuing it will receive very clear feedback what failed and for what reason - neat!
 
 ## Defaulting the ServiceAccount
+Simply add a codemarker above the field you want to default:
+```go
+type ConfigMapSyncSpec struct {
+  // ...
+  // +kubebuilder:default:={name: "default"}     #<- THIS ONE
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Service Account"
+	ServiceAccount ServiceAccount `json:"serviceAccount,omitempty"`
+```
+
+Now the value will be defaulted whenever it is not supplied or deleted.

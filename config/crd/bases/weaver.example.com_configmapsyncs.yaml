@@ -45,10 +45,11 @@ spec:
             description: ConfigMapSyncSpec defines the desired state of ConfigMapSync
             properties:
               serviceAccount:
-                description: ServiceAccount points to the namespaced ServiceAccount
-                  that will be used to sync ConfigMaps. This is to provide multitenancy,
-                  constraining the authority of the syncing to the RBAC access of
-                  the given namespaced ServiceAccount
+                default:
+                  name: default
+                description: |-
+                  ServiceAccount specifies the namespaced Kubernetes ServiceAccount to use when syncing ConfigMaps. The controller performs reconciliation using only the RBAC permissions granted to this ServiceAccount, enabling multitenancy by limiting its authority.
+                  If omitted, the default ServiceAccount in the controller's namespace will be used.
                 properties:
                   name:
                     description: Name of the ServiceAccount to use to sync ConfigMaps.
