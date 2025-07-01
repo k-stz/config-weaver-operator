@@ -102,15 +102,17 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.V(1).Info("found configMapSync in " + req.String())
 	}
 
-	// Works; refers to shared r struct
-	// TODO: probably BUG causing to many updates in one invokation?
-	// defer func() {
-	// 	r.updateStatus(ctx, &configMapSync)
-	// }()
-
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
-	// So now we have a ConfigMapSync object, lets
-	// try to create a configmap
+	// So now we have a ConfigMapSync object,
+	// First test if spec.serviceAccount is valid
+	sa, err := r.getServiceAccountFromCMS(ctx, &configMapSync)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	log.V(1).Info("serviceaccount successfullly retrieved", "Content", sa)
+
+	//
+	// Next we try to create a configmap
 	if err := r.createConfigMaps(ctx, &configMapSync); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
 		r.RunState.targetConfigMapsSynced = false
@@ -127,6 +129,24 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// To reconcile again after X time
 	// thus implementing best practice of
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
+	saName := cms.Spec.ServiceAccount.Name
+	log := log.FromContext(ctx).WithName("getServiceAccountFromCMS")
+	log.V(1).Info("try retrieving sa from cms.spec.serviceAccount", "name", saName)
+
+	saObjectKey := types.NamespacedName{
+		Name:      saName,
+		Namespace: cms.ObjectMeta.Namespace,
+	}
+	sa := &v1.ServiceAccount{}
+	if err := r.Get(ctx, saObjectKey, sa); err != nil {
+		log.Error(err, "Failed to retreive sa", "service account Name", saName)
+		return nil, err
+	}
+
+	return sa, nil
 }
 
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
