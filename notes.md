@@ -668,6 +668,52 @@ Now the value will be defaulted whenever it is not supplied or deleted.
 - Check whether the serviceaccount exists in the namespace
 - introduce .status condition for this! "ValidServiceAccount"
 
+Lean on implementation for the ClusterLogForwarder:
+
+```go
+// Source: cluster-logging-operator/internal/validations/observability/validate.go
+
+
+// ValidateServiceAccountPermissions validates a service account for permissions to collect
+// inputs specified by the CLF.
+// i.e. collect-application-logs, collect-audit-logs, collect-infrastructure-logs
+func validateServiceAccountPermissions(k8sClient client.Client, inputs sets.String, hasReceiverInputs bool, serviceAccount corev1.ServiceAccount, clfNamespace, name string) error {
+	if inputs.Len() == 0 && hasReceiverInputs {
+		return nil
+	}
+	if inputs.Len() == 0 {
+		err := errors.NewValidationError("There is an error in the input permission validation; no inputs were found to evaluate")
+		log.Error(err, "Error while evaluating ClusterLogForwarder permissions", "namespace", clfNamespace, "name", name)
+		return err
+	}
+	var err error
+	var username = fmt.Sprintf("system:serviceaccount:%s:%s", serviceAccount.Namespace, serviceAccount.Name)
+
+	// Perform subject access reviews for each spec'd input
+	var failedInputs []string
+	for _, input := range inputs.List() {
+		log.V(3).Info("[ValidateServiceAccountPermissions]", "input", input, "username", username)
+		sar := createSubjectAccessReview(username, allNamespaces, "collect", "logs", input, obs.GroupName)
+		log.V(3).Info("SubjectAccessReview", "obj", utilsjson.MustMarshal(sar))
+		if err = k8sClient.Create(context.TODO(), sar); err != nil {
+			return err
+		}
+		// If input is spec'd but SA isn't authorized to collect it, fail validation
+		log.V(3).Info("[ValidateServiceAccountPermissions]", "allowed", sar.Status.Allowed, "input", input)
+		if !sar.Status.Allowed {
+			failedInputs = append(failedInputs, input)
+		}
+	}
+
+	if len(failedInputs) > 0 {
+		return errors.NewValidationError("insufficient permissions on service account, not authorized to collect %q logs", failedInputs)
+	}
+
+	return nil
+}
+
+```
+
 ## TokenRequest the ServiceAccount
 
 ## Perform action on behalf of the ServiceAccount

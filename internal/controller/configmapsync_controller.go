@@ -48,9 +48,13 @@ type RunState struct {
 	cmsDeleted             bool // Set to true, when r.Get() returns nil!
 	sourceConfigMapFound   bool
 	targetConfigMapsSynced bool // true when all target configmaps
+	// when .spec.serviceAccount.Name was Get-able during reconciliation
+	serviceAccountFound bool
 }
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
+// TODO: Wait a minute, this struct isn't thread-safe, is it?
+// I'd like to know how to test this.
 type ConfigMapSyncReconciler struct {
 	client.Client // from manager
 	Scheme        *runtime.Scheme
@@ -109,9 +113,10 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	log.V(1).Info("serviceaccount successfullly retrieved", "Content", sa)
+	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
 
-	//
+	saObjectKey := client.ObjectKeyFromObject(sa)
+
 	// Next we try to create a configmap
 	if err := r.createConfigMaps(ctx, &configMapSync); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
@@ -132,6 +137,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
+	r.RunState.sourceConfigMapFound = false
 	saName := cms.Spec.ServiceAccount.Name
 	log := log.FromContext(ctx).WithName("getServiceAccountFromCMS")
 	log.V(1).Info("try retrieving sa from cms.spec.serviceAccount", "name", saName)
@@ -145,7 +151,7 @@ func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, 
 		log.Error(err, "Failed to retreive sa", "service account Name", saName)
 		return nil, err
 	}
-
+	r.RunState.sourceConfigMapFound = true
 	return sa, nil
 }
 
@@ -158,7 +164,7 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 
 	fmt.Println("## CURRENT CONDS len:", len(conds))
 	// This call changes the cms! so deep dopy is needed?
-	log.V(1).Info(fmt.Sprintf("Attempting to updateStatus"))
+	log.V(1).Info("Attempting to updateStatus")
 	return r.updateStatusWithConditions(ctx, conds, cms)
 
 	// if err := r.updateAllTargetsSyncedStatus(ctx, cms); err != nil {
