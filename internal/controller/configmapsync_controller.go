@@ -201,13 +201,13 @@ func (r *ConfigMapSyncReconciler) generateSourceFoundCondition(ctx context.Conte
 		ObservedGeneration: cms.GetGeneration(),
 		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
 		Reason:  "ConfigMapFound",
-		Message: "Source ConfigMap found in namespace " + cms.Spec.SourceNamespace,
+		Message: "Source ConfigMap found in namespace " + cms.Spec.Source.Namespace,
 	}
 	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
 	if !r.RunState.sourceConfigMapFound {
 		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
 		newCondition.Reason = "ConfigMapMissing"
-		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.SourceNamespace
+		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.Source.Namespace
 	}
 	return newCondition
 }
