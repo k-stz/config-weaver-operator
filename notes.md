@@ -99,6 +99,60 @@ that under options.k3s.extraArgs allows to pass tls-san:
           - server:*
 ```
 
+# Kubebuilder notes
+## r.Get(), r.Update() ...
+The operations to interact with a cluster are invoked as methods on the Reconciler struct `func (r ConfigMapSyncReconciler) Update`. What is used exactly? Let's inspect `r.Get()` for example when getting a `ServiceAccount`:
+```go
+sa := &v1.ServiceAccount{}
+	if err := r.Get(ctx, saObjectKey, sa); err != nil {
+```
+
+Why can `r.Get()` be used on the struct? Because it implements the `controller.Reader` interface:
+```go
+type Reader interface {
+	// Get retrieves an obj for the given object key from the Kubernetes Cluster.
+	// obj must be a struct pointer so that obj can be updated with the response
+	// returned by the Server.
+	Get(ctx context.Context, key ObjectKey, obj Object, opts ...GetOption) error
+
+	// List retrieves list of objects for a given namespace and list options. On a
+	// successful call, Items field in the list will be populated with the
+	// result returned from the server.
+	List(ctx context.Context, list ObjectList, opts ...ListOption) error
+}
+```
+Where is the implementation of `Get` and `List`? This is also implicit. The `ConfigMapSyncReconciler`-Struct contains an
+embedded interface:
+```go
+type ConfigMapSyncReconciler struct {
+	client.Client // <- Here. This is interface embedding
+	Scheme        *runtime.Scheme
+	Recorder      record.EventRecorder
+	RunState      RunState
+}
+```
+Interface embedding defines all methods on the struct, thus allowing the struct to be used in place of the interface. But it still needs to provide an implementation for `Get()` else it would
+panic on invokation! So where is it? In the kubebuilder manager initilization code, so in `cmd/main.go`:
+```go
+if err = (&controller.ConfigMapSyncReconciler{
+		Client:   mgr.GetClient(),  // <- here
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("configmapsync-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ConfigMapSync")
+		os.Exit(1)
+	}
+```
+The documentation of `GetClient()` states: "returns a client configuration with the Config", furthermore it also that the client may not be a fully "direct" client" -- it may read from cache and somewhere else it states only writes are direct. Digging into this mechanism unconvers that kubernetes-go-clients may be direct or indirect regardding reading from the cache or read/writing directly from the kube-apiserver.
+
+Continuing, the "Config" that `GetClient()` is provided when creating a manager via the first
+parameter to the `NewManager()` constructore:
+```go
+mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{ ... }
+```
+It's the `ctrl.GetConfigOrDie()`, it return "a `*rest.Config` for talking to the Kubernetes apiserver". This will search for all the canoncial locations like the serviceaccount token when in cluster, ~/.kube/config dir and look if he cli flag `--kubeconfig` is provided. 
+
+
 # Deploy pod using image from internal registry
 Finally run the newly pushed image in k3d cluster, note that you always have to provide the registry, else docker.io is implied and it will not find it:
 ```sh
