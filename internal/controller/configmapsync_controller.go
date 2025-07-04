@@ -18,12 +18,15 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 
 	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
+	authorizationapi "k8s.io/api/authorization/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -52,14 +55,27 @@ type RunState struct {
 	serviceAccountFound bool
 }
 
+const (
+	//allNamespaces is used for determining cluster scoped bindings
+	// used to create SAR requests
+	allNamespaces = ""
+)
+
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
 // TODO: Wait a minute, this struct isn't thread-safe, is it?
-// I'd like to know how to test this.
+// I'd like to know how to test this. I think a better way to instead of tracking
+// the RunState which is used for .status.condition generation is to do the .status.Condition
+// setting directly on the in-process CMS object and r.Update it against the cluster as final
+// step of reconciliation
+// that's also how the cluster-log-forwarder operator does it!
 type ConfigMapSyncReconciler struct {
 	client.Client // from manager
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
-	RunState      RunState
+	// TODO: bad, not-threadsafe but used in a concurrent context...
+	// instead calculate the state inside the goroutine of a Reconcile run, the struct is shared
+	// concurrently
+	RunState RunState
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
@@ -114,8 +130,15 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
+	if err := r.validateServiceAccountPermissions(ctx, sa, &configMapSync); err != nil {
+		// TODO either in the method, or here, set the status.condition indicating the failed
+		// SA validation and the reason!i
+		return ctrl.Result{}, err
+	}
 
-	saObjectKey := client.ObjectKeyFromObject(sa)
+	// Testing stuff
+	// r.runExperiment(ctx)
+	// saObjectKey := client.ObjectKeyFromObject(sa)
 
 	// Next we try to create a configmap
 	if err := r.createConfigMaps(ctx, &configMapSync); err != nil {
@@ -136,9 +159,36 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
+func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
+	log := log.FromContext(ctx).WithName("EXPERIMENTS")
+	log.V(1).Info("starting experiments")
+	log.V(1).Info("make request for nodes")
+
+	// 3rd paramter to r.Client.List() interface wanting method ApplyToList(*ListOptions)
+	// ListOptions is a struct that can e.g. filter by labels
+	nodeList := v1.NodeList{}
+	fmt.Println("### r.List:", nodeList)
+
+	// if err := r.List(ctx, &nodeList, ApplyToListFunc(f)); err != nil {
+	// 	fmt.Println("### r.List PANICs:", nodeList)
+
+	// 	panic(err)
+	// }
+	// 	List(ctx context.Context, list ObjectList, opts ...ListOption) error
+
+	if err := r.List(ctx, &nodeList,
+		client.MatchingLabels{"kubernetes.io/hostname": "k3d-mycluster-agent-0"}); err != nil {
+		fmt.Println("### r.List PANICs:", nodeList)
+		panic(err)
+	}
+
+	fmt.Println("### NODELIST:", nodeList)
+
+}
+
 func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
 	r.RunState.sourceConfigMapFound = false
-	saName := cms.Spec.ServiceAccount.Name
+	saName := cms.Spec.ServiceAccount.Name //
 	log := log.FromContext(ctx).WithName("getServiceAccountFromCMS")
 	log.V(1).Info("try retrieving sa from cms.spec.serviceAccount", "name", saName)
 
@@ -153,6 +203,64 @@ func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, 
 	}
 	r.RunState.sourceConfigMapFound = true
 	return sa, nil
+}
+
+func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.Context, serviceAccount *v1.ServiceAccount, cms *v1alpha1.ConfigMapSync) error {
+	log := log.FromContext(ctx).WithName("validateServiceAccountPermissions")
+	var err error
+	var username = fmt.Sprintf("system:serviceaccount:%s:%s", serviceAccount.Namespace, serviceAccount.Name)
+	log.V(1).Info("validating sa", "sa", username)
+
+	//readNamespace := cms.GetNamespace()
+	writeNamespaces := cms.Spec.SyncToNamespaces
+
+	// Perform subject access reviews for each spec'd input
+	var failedInputs []string
+	for _, ns := range writeNamespaces {
+		log.V(3).Info("[ValidateServiceAccountPermissionsWriteNamespaces]", "namespace", ns, "username", username)
+		//sar := createSubjectAccessReview(username, allNamespaces, "collect", "logs", input, obs.GroupName)
+		// Resource="" means all, while Group="" should mean default "api" group containing configmaps
+		sar := createSubjectAccessReview(username, ns, "update", "configmaps", "", "")
+
+		log.V(3).Info("SubjectAccessReview", "for Ns", ns, "sar", sar)
+		if err = r.Create(context.TODO(), sar); err != nil {
+			return err
+		}
+		// If input is spec'd but SA isn't authorized to collect it, fail validation
+		log.V(3).Info("[ValidateServiceAccountPermissions]", "allowed", sar.Status.Allowed, "ns", ns)
+		if !sar.Status.Allowed {
+			failedInputs = append(failedInputs, ns)
+		}
+	}
+
+	// if len(failedInputs) > 0 {
+	// 	return errors.NewValidationError("insufficient permissions on service account, not authorized to collect %q logs", failedInputs)
+	// }
+
+	return nil
+}
+
+func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAPIGroup string) *authorizationapi.SubjectAccessReview {
+	sar := &authorizationapi.SubjectAccessReview{
+		Spec: authorizationapi.SubjectAccessReviewSpec{
+			User: user,
+		},
+	}
+	if strings.HasPrefix(resource, "/") {
+		sar.Spec.NonResourceAttributes = &authorizationapi.NonResourceAttributes{
+			Path: resource,
+			Verb: verb,
+		}
+	} else {
+		sar.Spec.ResourceAttributes = &authorizationapi.ResourceAttributes{
+			Resource:  resource,
+			Namespace: namespace,
+			Group:     resourceAPIGroup,
+			Verb:      verb,
+			Name:      name,
+		}
+	}
+	return sar
 }
 
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
@@ -271,11 +379,22 @@ func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context
 	return nil
 }
 
+// JSONString returns a JSON string of a value, or an error message.
+// Indented output for flat json inputs
+func MustMarshal(v interface{}) (value string) {
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		log.Log.V(0).WithName("MustMarshal").Error(err, "unable to marshal object", "object", v)
+		return ""
+	}
+	return string(out)
+}
+
 // Fetch source ConfigMap and ensure the OwnerRef is set for and attempting to Update() it
 // Otherwise error out
 func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
 	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
-	log.V(1).Info(fmt.Sprint("attempting to get sourceConfigMap"))
+	log.V(1).Info("attempting to get sourceConfigMap")
 	sourceCM, err := r.getSourceConfigMap(ctx, configMapSync)
 	if err != nil {
 		r.RunState.sourceConfigMapFound = false
@@ -288,7 +407,7 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 	// }
 
 	r.setOwnerMetadata(configMapSync, sourceCM)
-	fmt.Println("## setOwnerMetadata on sourceCM", sourceCM)
+	fmt.Println("## setOwnerMetadata on sourceCM", MustMarshal(sourceCM))
 
 	if err := r.Update(ctx, sourceCM); err != nil {
 		log.Error(err, "Failed setting OwnerMetadata on Source ConfigMap")
