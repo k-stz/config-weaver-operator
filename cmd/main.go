@@ -76,7 +76,7 @@ func main() {
 		Development: true,
 		// Level 1: only shows Errors
 		// Level -1: Shows Info level 1 and below
-		Level: zapcore.Level(-3), // higher values are more restricitve
+		Level: zapcore.Level(-1), // higher values are more restricitve
 
 	}
 	opts.BindFlags(flag.CommandLine)
