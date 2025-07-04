@@ -260,6 +260,9 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 			Name:      name,
 		}
 	}
+	fmt.Printf("###SAR for user=%s ns=%s verb=%s resource=%s name=%s APIgrp=%s \n",
+		user, namespace, verb, resource, name, resourceAPIGroup)
+	fmt.Println(MustMarshal(sar))
 	return sar
 }
 
@@ -407,7 +410,7 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 	// }
 
 	r.setOwnerMetadata(configMapSync, sourceCM)
-	fmt.Println("## setOwnerMetadata on sourceCM", MustMarshal(sourceCM))
+	log.V(3).Info("setOwnerMetadata on sourceCM", "sourceCM", sourceCM)
 
 	if err := r.Update(ctx, sourceCM); err != nil {
 		log.Error(err, "Failed setting OwnerMetadata on Source ConfigMap")
