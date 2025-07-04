@@ -1,0 +1,35 @@
+# test with
+# kubectl auth can-i --as system:serviceaccount:default:default create configmaps -n foo
+#
+#rbac.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  creationTimestamp: null
+  name: foo-configmap-sync
+  namespace: foo
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - update
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  creationTimestamp: null
+  name: foo-configmap-sync
+  namespace: foo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: foo-configmap-sync
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: default
