@@ -209,6 +209,8 @@ func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, 
 // Validates whether given SA can access the resorces required
 // Return values: nil when successful
 // In case of error .status.condition is set with the namespaces that failed the SAR request
+//
+// Adapted from  https://github.com/openshift/cluster-logging-operator/internal/validations/observability/validate_permissions.go, licensed under the Apache License 2.0
 func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.Context, serviceAccount *v1.ServiceAccount, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("validateServiceAccountPermissions")
 	var err error
@@ -223,33 +225,28 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 	var failedNamespaces []string
 	for _, ns := range processNamespaces {
 		log.V(3).Info("[ValidateServiceAccountPermissionsWriteNamespaces]", "namespace", ns, "username", username)
-		//sar := createSubjectAccessReview(username, allNamespaces, "collect", "logs", input, obs.GroupName)
-		// Resource="" means all, while Group="" should mean default "api" group containing configmaps
+		// Resource="" means all, while Group="" implies the default "api" containg ConfigMaps
 		sar := createSubjectAccessReview(username, ns, "update", "configmaps", "", "")
 
-		// log.V(3).Info("SubjectAccessReview before create", "for namespace", ns, "sar.spec", sar.Spec, "sar.status", sar.Status)
 		if err = r.Create(context.TODO(), sar); err != nil {
 			return err
 		}
 		log.V(3).Info("[ValidateServiceAccountPermissions] SubjectAccessReview AFTER create", "for namespace", ns, "sar.spec", sar.Spec, "sar.status", sar.Status)
-		// fmt.Println("###SubjectAccessReview AFTER create raw:")
-		// fmt.Println(MustMarshal(sar))
-		// If input is spec'd but SA isn't authorized to collect it, fail validation
-		log.V(3).Info("[ValidateServiceAccountPermissions]", "allowed", sar.Status.Allowed, "ns", ns)
 		if !sar.Status.Allowed {
 			failedNamespaces = append(failedNamespaces, ns)
 		}
 	}
 
 	if len(failedNamespaces) > 0 {
-		// the %q verb should quote the slice of strings (failedNamespaces)
-		errMsg := fmt.Sprintf("insufficient permissions on service account %s. Not authorized to create, update or delete configmaps in the following namespaces %q", username, failedNamespaces)
+
+		errMsg := fmt.Sprintf("insufficient permissions on service account %s. Not authorized to create, update or delete configmaps in the following namespaces %s", username, failedNamespaces)
 		return errors.New(errMsg)
 	}
 
 	return nil
 }
 
+// Adapted from https://github.com/openshift/cluster-logging-operator/internal/validations/observability/validate_permissions.go, licensed under the Apache License 2.0 just like this code
 func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAPIGroup string) *authorizationapi.SubjectAccessReview {
 	sar := &authorizationapi.SubjectAccessReview{
 		Spec: authorizationapi.SubjectAccessReviewSpec{
