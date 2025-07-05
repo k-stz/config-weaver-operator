@@ -390,7 +390,20 @@ According to the api-convention Conditions are most useful when they follow some
   - The latter, intermediate states, may be indicated by setting the status of the condition to `Unknown`
   - For state Transitions that take a long time (e.g. more than 1 minute), it is reasonable to treat the trasition itself as an observed state!. In this case a Condition such as "Resizing" itself should not be transient and should instead be signalled using True/False/Unknown pattern.
 
+### Refactor status.conditions
+Inspired by cluster-logging-operator I want to set the conditions in during reconciliation in the process memory and then via a defered call at the end of each reconciliation apply it:
 
+When this works the advantage is that if that works:
+- we can set the conditions where they occur in the code
+- track the condition via the inmemory .status fields instead of the thread-unprotectable Reconciler struct (the .RunState field) as is currently implemented
+
+```go
+readyCond := internalobs.NewCondition(obsv1.ConditionTypeReady, obsv1.ConditionUnknown, obsv1.ReasonUnknownState, "")
+
+defer func() {
+		updateStatus(r.Client, r.Forwarder, readyCond)
+}()
+```
 
 ## API Machinery: Phases vs Conditions
 Discussion/Source: https://github.com/kubernetes/kubernetes/issues/7856
