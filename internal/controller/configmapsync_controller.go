@@ -222,10 +222,13 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 		// Resource="" means all, while Group="" should mean default "api" group containing configmaps
 		sar := createSubjectAccessReview(username, ns, "update", "configmaps", "", "")
 
-		log.V(3).Info("SubjectAccessReview", "for Ns", ns, "sar", sar)
+		// log.V(3).Info("SubjectAccessReview before create", "for namespace", ns, "sar.spec", sar.Spec, "sar.status", sar.Status)
 		if err = r.Create(context.TODO(), sar); err != nil {
 			return err
 		}
+		log.V(3).Info("[ValidateServiceAccountPermissions] SubjectAccessReview AFTER create", "for namespace", ns, "sar.spec", sar.Spec, "sar.status", sar.Status)
+		// fmt.Println("###SubjectAccessReview AFTER create raw:")
+		// fmt.Println(MustMarshal(sar))
 		// If input is spec'd but SA isn't authorized to collect it, fail validation
 		log.V(3).Info("[ValidateServiceAccountPermissions]", "allowed", sar.Status.Allowed, "ns", ns)
 		if !sar.Status.Allowed {
@@ -260,9 +263,9 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 			Name:      name,
 		}
 	}
-	fmt.Printf("###SAR for user=%s ns=%s verb=%s resource=%s name=%s APIgrp=%s \n",
-		user, namespace, verb, resource, name, resourceAPIGroup)
-	fmt.Println(MustMarshal(sar))
+	// fmt.Printf("###SAR for user=%s ns=%s verb=%s resource=%s name=%s APIgrp=%s \n",
+	// 	user, namespace, verb, resource, name, resourceAPIGroup)
+	// fmt.Println(MustMarshal(sar))
 	return sar
 }
 
@@ -384,6 +387,9 @@ func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context
 
 // JSONString returns a JSON string of a value, or an error message.
 // Indented output for flat json inputs
+// Careful: this apparently attempts to print all the fields of an object, even the status field
+// interpreting a missing fields as the zero value, even when the object wasn't created yet against
+// the api
 func MustMarshal(v interface{}) (value string) {
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
