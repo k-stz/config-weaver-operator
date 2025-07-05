@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strconv"
@@ -132,7 +133,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
 	if err := r.validateServiceAccountPermissions(ctx, sa, &configMapSync); err != nil {
 		// TODO either in the method, or here, set the status.condition indicating the failed
-		// SA validation and the reason!i
+		// SA validation and the reason!
 		return ctrl.Result{}, err
 	}
 
@@ -205,6 +206,9 @@ func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, 
 	return sa, nil
 }
 
+// Validates whether given SA can access the resorces required
+// Return values: nil when successful
+// In case of error .status.condition is set with the namespaces that failed the SAR request
 func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.Context, serviceAccount *v1.ServiceAccount, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("validateServiceAccountPermissions")
 	var err error
@@ -212,11 +216,12 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 	log.V(1).Info("validating sa", "sa", username)
 
 	//readNamespace := cms.GetNamespace()
-	writeNamespaces := cms.Spec.SyncToNamespaces
+	processNamespaces := append(cms.Spec.SyncToNamespaces, cms.Spec.Source.Namespace)
 
 	// Perform subject access reviews for each spec'd input
-	var failedInputs []string
-	for _, ns := range writeNamespaces {
+	// failedNamespaces will list all namespaces for which the SAR failed, meaning the given
+	var failedNamespaces []string
+	for _, ns := range processNamespaces {
 		log.V(3).Info("[ValidateServiceAccountPermissionsWriteNamespaces]", "namespace", ns, "username", username)
 		//sar := createSubjectAccessReview(username, allNamespaces, "collect", "logs", input, obs.GroupName)
 		// Resource="" means all, while Group="" should mean default "api" group containing configmaps
@@ -232,13 +237,15 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 		// If input is spec'd but SA isn't authorized to collect it, fail validation
 		log.V(3).Info("[ValidateServiceAccountPermissions]", "allowed", sar.Status.Allowed, "ns", ns)
 		if !sar.Status.Allowed {
-			failedInputs = append(failedInputs, ns)
+			failedNamespaces = append(failedNamespaces, ns)
 		}
 	}
 
-	// if len(failedInputs) > 0 {
-	// 	return errors.NewValidationError("insufficient permissions on service account, not authorized to collect %q logs", failedInputs)
-	// }
+	if len(failedNamespaces) > 0 {
+		// the %q verb should quote the slice of strings (failedNamespaces)
+		errMsg := fmt.Sprintf("insufficient permissions on service account %s. Not authorized to create, update or delete configmaps in the following namespaces %q", username, failedNamespaces)
+		return errors.New(errMsg)
+	}
 
 	return nil
 }
