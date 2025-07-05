@@ -167,6 +167,20 @@ mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{ ... }
 It's the `ctrl.GetConfigOrDie()`, it return "a `*rest.Config` for talking to the Kubernetes apiserver". This will search for all the canoncial locations like the serviceaccount token when in cluster, ~/.kube/config dir and look if he cli flag `--kubeconfig` is provided. 
 
 
+
+## Subresource /status
+To directly change the .status subresource you need to use
+```bash
+kubectl patch cms configmapsync-sample --type merge -p '{"status": {"test": "teststring"}}' --subresource=status
+configmapsync.weaver.example.com/configmapsync-sample patched
+```
+OR simply with the `--subresouce` switch it works interactively! Like this:
+```bash
+kubectl edit cms configmapsync-sample --subresource status
+```
+
+
+
 # Deploy pod using image from internal registry
 Finally run the newly pushed image in k3d cluster, note that you always have to provide the registry, else docker.io is implied and it will not find it:
 ```sh
