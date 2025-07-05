@@ -99,6 +99,20 @@ that under options.k3s.extraArgs allows to pass tls-san:
           - server:*
 ```
 
+
+# Git Vultures: Many Repo Clones is fake engagement
+ince I made this repository public on GitHub, it’s been cloned a lot daily, often by unique sources. Every time I push a new commit, I see a spike in unique clones. This isn’t because my work-in-progress operator is wildly popular or people desperately need the latest changes. Instead, we’re likely dealing with "Git Vultures," as described in Matthew Zito’s blog post, "Git Vultures: The Bots That Are Stalking Your Git Repositories". (Source: https://medium.com/@exbotanical/git-vultures-the-bots-that-are-stalking-your-git-repositories-ec81e06dcd04).
+	
+Simply put, Git Vultures are bots that scan repositories, hoping to find leaked credentials, secrets, or tokens. They probably chose this repo reling on a basic heuristic: my code involves these concepts, which the bots figure by searching for suggestive keywords using something like this:	
+
+```bash
+$ git grep -E 'token|secret' $(git rev-list --all)  | wc -l
+1011
+```
+The bots probably use such a regex pattern or some shared "naughty"-list of suspicious terms to flag potential leaks.
+
+*raises finger in a moralistic manner*: Remember that any commit is stored in its entirety in .git and thus in your GitHub repo. Simply removing the leaked information is not enough. If credentials have been commited and pushed they are considered leaked and thus compromised and need to be renewed. Only if you have commited them locally they can be considered salvagable, in the simplest case purge your local repo and reclone.
+
 # Kubebuilder notes
 ## r.Get(), r.Update() ...
 The operations to interact with a cluster are invoked as methods on the Reconciler struct `func (r ConfigMapSyncReconciler) Update`. What is used exactly? Let's inspect `r.Get()` for example when getting a `ServiceAccount`:
@@ -765,7 +779,6 @@ func validateServiceAccountPermissions(k8sClient client.Client, inputs sets.Stri
 
 	return nil
 }
-
 ```
 
 ## TokenRequest the ServiceAccount
