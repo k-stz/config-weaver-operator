@@ -58,6 +58,13 @@ var _ = Describe("ConfigMapSync Controller", func() {
 
 		sourceCMDataContent := map[string]string{"firstfield": "bar", "f2": "v2"}
 
+		// serviceaccount
+		namespacedNameServiceAccount := types.NamespacedName{
+			Name:      "default",
+			Namespace: "default",
+		}
+		objectServiceAccount := &v1.ServiceAccount{}
+
 		BeforeEach(func() {
 			By(fmt.Sprint("Ensure target namespace ", targetNamespace, " exists"))
 
@@ -79,6 +86,18 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
 			}
 
+			By(fmt.Sprint("creating the default service account later use by CMS ", cmsNamespace+"/"+cmsName))
+			err = k8sClient.Get(ctx, namespacedNameCMS, objectServiceAccount)
+			if err != nil && errors.IsNotFound(err) {
+				objectServiceAccount := &v1.ServiceAccount{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      namespacedNameServiceAccount.Name,
+						Namespace: namespacedNameServiceAccount.Namespace,
+					},
+				}
+				Expect(k8sClient.Create(ctx, objectServiceAccount)).To(Succeed())
+			}
+
 			By(fmt.Sprint("creating the custom resource for the Kind ConfigMapSync ", cmsNamespace+"/"+cmsName))
 			err = k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
 			if err != nil && errors.IsNotFound(err) {
@@ -94,6 +113,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 						},
 						// configure target ns here
 						SyncToNamespaces: []string{targetNamespace},
+						ServiceAccount:   weaverv1alpha1.ServiceAccount{Name: "default"},
 					},
 				}
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
