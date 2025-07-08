@@ -100,7 +100,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, objectServiceAccount)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating rbac Role for the serviceaccount", cmsNamespace+"/"+cmsName))
+			By(fmt.Sprint("creating rbac Role for the serviceaccount for the default ns", cmsNamespace+"/"+cmsName))
 			roleObj := &rbacv1.Role{}
 			roleNamedNamespace := types.NamespacedName{
 				Name:      "cms-sync",
@@ -124,7 +124,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, roleObj)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating Rolebinding  serviceaccount", cmsNamespace+"/"+cmsName))
+			By(fmt.Sprint("creating Rolebinding serviceaccount for namespace ", "default", cmsNamespace+"/"+cmsName))
 			rolebindingObj := &rbacv1.RoleBinding{}
 			roleNamedNamespace = types.NamespacedName{
 				Name:      "cms-sync",
@@ -150,6 +150,58 @@ var _ = Describe("ConfigMapSync Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, rolebindingObj)).To(Succeed())
+			}
+
+			By(fmt.Sprint("creating rbac Role for the serviceaccount for the namespace ", targetNamespace, cmsNamespace+"/"+cmsName))
+			roleObjTargetNs := &rbacv1.Role{}
+			roleNamedNamespaceTargetNs := types.NamespacedName{
+				Name:      "cms-sync",
+				Namespace: targetNamespace,
+			}
+			err = k8sClient.Get(ctx, roleNamedNamespaceTargetNs, roleObjTargetNs)
+			if err != nil && errors.IsNotFound(err) {
+				roleObjTargetNs = &rbacv1.Role{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cms-sync",
+						Namespace: targetNamespace,
+					},
+					Rules: []rbacv1.PolicyRule{
+						{
+							APIGroups: []string{""},
+							Verbs:     []string{"create", "update", "delete"},
+							Resources: []string{"configmaps"},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, roleObjTargetNs)).To(Succeed())
+			}
+
+			By(fmt.Sprint("creating Rolebinding serviceaccount for the namespace", targetNamespace, cmsNamespace+"/"+cmsName))
+			rolebindingObjTargetNs := &rbacv1.RoleBinding{}
+			roleNamedNamespaceTargetNs = types.NamespacedName{
+				Name:      "cms-sync",
+				Namespace: targetNamespace,
+			}
+			err = k8sClient.Get(ctx, roleNamedNamespaceTargetNs, rolebindingObjTargetNs)
+			if err != nil && errors.IsNotFound(err) {
+				rolebindingObjTargetNs = &rbacv1.RoleBinding{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      roleNamedNamespaceTargetNs.Name,
+						Namespace: roleNamedNamespaceTargetNs.Namespace,
+					},
+					RoleRef: rbacv1.RoleRef{
+						APIGroup: "rbac.authorization.k8s.io",
+						Kind:     "Role",
+						Name:     "cms-sync",
+					},
+					Subjects: []rbacv1.Subject{
+						{Kind: "ServiceAccount",
+							Name:      "default",
+							Namespace: "default",
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, rolebindingObjTargetNs)).To(Succeed())
 			}
 
 			By(fmt.Sprint("creating the custom resource for the Kind ConfigMapSync ", cmsNamespace+"/"+cmsName))
