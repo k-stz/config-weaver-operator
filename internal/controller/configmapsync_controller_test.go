@@ -124,7 +124,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, roleObj)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating Rolebinding for the serviceaccount", cmsNamespace+"/"+cmsName))
+			By(fmt.Sprint("creating Rolebinding  serviceaccount", cmsNamespace+"/"+cmsName))
 			rolebindingObj := &rbacv1.RoleBinding{}
 			roleNamedNamespace = types.NamespacedName{
 				Name:      "cms-sync",
@@ -149,7 +149,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 						},
 					},
 				}
-				Expect(k8sClient.Create(ctx, roleObj)).To(Succeed())
+				Expect(k8sClient.Create(ctx, rolebindingObj)).To(Succeed())
 			}
 
 			By(fmt.Sprint("creating the custom resource for the Kind ConfigMapSync ", cmsNamespace+"/"+cmsName))
@@ -262,6 +262,12 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			err = k8sClient.Get(ctx, namespacedNameCM, objectSourceCM)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Delete(ctx, objectSourceCM)).To(Succeed())
+
+			By("Cleanup the source serviceaccount")
+			//objectSourceCM := &v1.ConfigMap{}
+			err = k8sClient.Get(ctx, namespacedNameServiceAccount, objectServiceAccount)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Delete(ctx, objectServiceAccount)).To(Succeed())
 
 			// ENVTEST CAN'T DELETE NAMESPACES!
 			// Source: https://book.kubebuilder.io/reference/envtest.html?utm_source=chatgpt.com#namespace-usage-limitation
