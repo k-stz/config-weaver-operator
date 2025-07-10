@@ -59,7 +59,9 @@ type RunState struct {
 const (
 	//allNamespaces is used for determining cluster scoped bindings
 	// used to create SAR requests
-	allNamespaces = ""
+	allNamespaces      = ""
+	ConditionTypeReady = "Ready"
+	ReasonUnknownState = "UnknownState"
 )
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
@@ -108,30 +110,39 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// that's why you shouldn't modify the object directly but first
 	// create a DeepCopy of it
 	cmsFound = true
-	configMapSync := v1alpha1.ConfigMapSync{}
-	if err := r.Get(ctx, req.NamespacedName, &configMapSync); err != nil {
+	cms := &v1alpha1.ConfigMapSync{}
+	if err := r.Get(ctx, req.NamespacedName, cms); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to get configMapSync")
-			r.updateStatus(ctx, &configMapSync)
+			// r.updateStatus(ctx, &configMapSync) // don't set status on a resource you can't get!
+			// other error, requeue with exponential back-off
 			return ctrl.Result{}, err
 		}
 		cmsFound = false
 	}
+	cms = cms.DeepCopy()
+
+	// r.removeStaleStatuses() // maybe at this point
 
 	// if not found, then we have a deletion
 	if cmsFound {
 		log.V(1).Info("found configMapSync in " + req.String())
 	}
 
-	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", configMapSync.Spec.TestNum))
+	// can it deal with not-set cms.Generation?
+	readyCond := NewCondition(ConditionTypeReady, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
+	defer func() {
+		r.newUpdateStatus(ctx, cms, readyCond)
+	}()
+	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", cms.Spec.TestNum))
 	// So now we have a ConfigMapSync object,
 	// First test if spec.serviceAccount is valid
-	sa, err := r.getServiceAccountFromCMS(ctx, &configMapSync)
+	sa, err := r.getServiceAccountFromCMS(ctx, cms)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
-	if err := r.validateServiceAccountPermissions(ctx, sa, &configMapSync); err != nil {
+	if err := r.validateServiceAccountPermissions(ctx, sa, cms); err != nil {
 		// TODO either in the method, or here, set the status.condition indicating the failed
 		// SA validation and the reason!
 		return ctrl.Result{}, err
@@ -142,16 +153,24 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// saObjectKey := client.ObjectKeyFromObject(sa)
 
 	// Next we try to create a configmap
-	if err := r.createConfigMaps(ctx, &configMapSync); err != nil {
+	if err := r.createConfigMaps(ctx, cms); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
 		r.RunState.targetConfigMapsSynced = false
-		r.updateStatus(ctx, &configMapSync)
+		r.updateStatus(ctx, cms)
 		return ctrl.Result{}, err
 	}
 	r.RunState.targetConfigMapsSynced = true
 
-	r.updateStatus(ctx, &configMapSync)
-	//r.updateStatus(ctx, &configMapSync)
+	// cluster-logging-forwarder code uses this:
+	// removeStaleStatuses(r.Forwarder)
+	//
+	// readyCond := internalobs.NewCondition(obsv1.ConditionTypeReady, obsv1.ConditionUnknown, obsv1.ReasonUnknownState, "")
+	// defer func() {
+	// 	updateStatus(r.Client, r.Forwarder, readyCond)
+	// }()
+
+	r.updateStatus(ctx, cms)
+	//r.updateStatus(ctx, &cms)
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
 
@@ -273,7 +292,25 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 	return sar
 }
 
+// Method only because we use the embeded struct client.Client for requests
+func (r *ConfigMapSyncReconciler) newUpdateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync, ready metav1.Condition) {
+	// cms
+	return
+}
+
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
+	// cluster-logging-forwarder implementaiton:
+	// func updateStatus(k8Client client.Client, instance *obsv1.ClusterLogForwarder, ready metav1.Condition) {
+	// 	jsonPatch, _ := json.Marshal(map[string]interface{}{
+	// 		"status": instance.Status,
+	// 	})
+	// 	internalobs.SetCondition(&instance.Status.Conditions, ready)
+	// 	if err := k8Client.Status().Patch(context.TODO(), instance, client.RawPatch(types.MergePatchType, jsonPatch)); err != nil {
+	// 		log.Error(err, "Error updating status", "status", instance.Status)
+	// 	}
+	// }
+	// it uses a patch
+
 	log := log.FromContext(ctx).WithName("updateStatus")
 	var conds []metav1.Condition
 	conds = append(conds, r.generateSourceFoundCondition(ctx, cms))
@@ -295,6 +332,16 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 	// 	return err
 	// }
 	//return nil
+}
+
+func NewCondition(conditionType string, status metav1.ConditionStatus, observedGeneration int64, reason, message string) metav1.Condition {
+	return metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		ObservedGeneration: observedGeneration,
+		Reason:             reason,
+		Message:            message,
+	}
 }
 
 // Whether ConfiMapSync controller is operational and state successfully reconciled
