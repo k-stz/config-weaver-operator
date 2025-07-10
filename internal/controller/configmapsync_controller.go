@@ -46,16 +46,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-// Represents staet of a single reconciliation run
-// used to regenerate fresh status for ConfigMapSync.status
-type RunState struct {
-	cmsDeleted             bool // Set to true, when r.Get() returns nil!
-	sourceConfigMapFound   bool
-	targetConfigMapsSynced bool // true when all target configmaps
-	// when .spec.serviceAccount.Name was Get-able during reconciliation
-	serviceAccountFound bool
-}
-
 const (
 	//allNamespaces is used for determining cluster scoped bindings
 	// used to create SAR requests
@@ -66,20 +56,10 @@ const (
 )
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
-// TODO: Wait a minute, this struct isn't thread-safe, is it?
-// I'd like to know how to test this. I think a better way to instead of tracking
-// the RunState which is used for .status.condition generation is to do the .status.Condition
-// setting directly on the in-process CMS object and r.Update it against the cluster as final
-// step of reconciliation
-// that's also how the cluster-log-forwarder operator does it!
 type ConfigMapSyncReconciler struct {
 	client.Client // from manager
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
-	// TODO: bad, not-threadsafe but used in a concurrent context...
-	// instead calculate the state inside the goroutine of a Reconcile run, the struct is shared
-	// concurrently
-	RunState RunState
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
@@ -99,41 +79,29 @@ type ConfigMapSyncReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var cmsFound bool = false // whether in this reconciliation run CMS was found
 
 	log := log.FromContext(ctx).WithName("Reconcile") // prepends name to log lines
 	if log.Enabled() {
 		log.V(1).Info("Reconcile invoked with Request: " + req.String())
 	}
-	// TODO: Important, apparently reading the object from Get
-	// reads it from the controller-runtime cache NOT from the K8s API
-	// This cache might be shared by multiple instances of reconcilation
-	// that's why you shouldn't modify the object directly but first
-	// create a DeepCopy of it
-	cmsFound = true
 	cms := &v1alpha1.ConfigMapSync{}
 	if err := r.Get(ctx, req.NamespacedName, cms); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to get configMapSync")
-			// r.updateStatus(ctx, &configMapSync) // don't set status on a resource you can't get!
 			// other error, requeue with exponential back-off
 			return ctrl.Result{}, err
 		}
-		cmsFound = false
 	}
+	// we create the DeepCopy right of the bat Because the read CMS comes from
+	// the a "shared informer" cache (controller-runtime construct) we create a
+	// deepdopy here such that concurrent Reconcile invokation don't share this
+	// memory avoiding race-conditions
 	cms = cms.DeepCopy()
 
 	// r.removeStaleStatuses() // maybe at this point
-
-	// if not found, then we have a deletion
-	if cmsFound {
-		log.V(1).Info("found configMapSync in " + req.String())
-	}
-
-	// can it deal with not-set cms.Generation?
 	readyCond := NewCondition(ConditionTypeReady, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
 	defer func() {
-		r.newUpdateStatus(ctx, cms, readyCond)
+		r.updateStatus(ctx, cms, readyCond)
 	}()
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", cms.Spec.TestNum))
 	// So now we have a ConfigMapSync object,
@@ -305,16 +273,16 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 	return sar
 }
 
-// newUpdateStatus assumes that througout a call of r.Reconcile() the .Status.Condition fields are
+// updateStatus assumes that througout a call of r.Reconcile() the .Status.Condition fields are
 // updated use meta.SetStatusCondition, as this addes new COnditions while updating existing ones.
-// newUpdateStatus finally sets the ready condition, which is closed-over in Reconcile, such that
+// updateStatus finally sets the ready condition, which is closed-over in Reconcile, such that
 // it is intially in the UnknwonState and throughout the Reconcile Run evaluated to its actual
 // value.
 // Finally updateStatus will update the .Status.Conditions field against the k8s cluster!
 //
 // Method only because we use the embeded struct client.Client for requests
-func (r *ConfigMapSyncReconciler) newUpdateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync, ready metav1.Condition) {
-	log := log.FromContext(ctx).WithName("[newUpdateStatus]")
+func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync, ready metav1.Condition) {
+	log := log.FromContext(ctx).WithName("[updateStatus]")
 
 	// will add condition if missing; and update if present!
 	meta.SetStatusCondition(&cms.Status.Conditions, ready)
@@ -326,42 +294,6 @@ func (r *ConfigMapSyncReconciler) newUpdateStatus(ctx context.Context, cms *v1al
 
 }
 
-func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	// cluster-logging-forwarder implementaiton:
-	// func updateStatus(k8Client client.Client, instance *obsv1.ClusterLogForwarder, ready metav1.Condition) {
-	// 	jsonPatch, _ := json.Marshal(map[string]interface{}{
-	// 		"status": instance.Status,
-	// 	})
-	// 	internalobs.SetCondition(&instance.Status.Conditions, ready)
-	// 	if err := k8Client.Status().Patch(context.TODO(), instance, client.RawPatch(types.MergePatchType, jsonPatch)); err != nil {
-	// 		log.Error(err, "Error updating status", "status", instance.Status)
-	// 	}
-	// }
-	// it uses a patch
-
-	log := log.FromContext(ctx).WithName("updateStatus")
-	var conds []metav1.Condition
-	//conds = append(conds, r.generateSourceFoundCondition(ctx, cms))
-	// conds = append(conds, r.generateAllTargetsSyncedStatusCondition(ctx, cms))
-	conds = append(conds, r.generateReadyStatusCondition(ctx, cms))
-
-	fmt.Println("## CURRENT CONDS len:", len(conds))
-	// This call changes the cms! so deep dopy is needed?
-	log.V(1).Info("Attempting to updateStatus")
-	return r.updateStatusWithConditions(ctx, conds, cms)
-
-	// if err := r.updateAllTargetsSyncedStatus(ctx, cms); err != nil {
-	// 	log.Error(err, "unable to update Status Synced")
-	// 	return err
-	// }
-
-	// if err := r.updateReadyStatus(ctx, cms); err != nil {
-	// 	log.Error(err, "unable to update Status Ready")
-	// 	return err
-	// }
-	//return nil
-}
-
 func NewCondition(conditionType string, status metav1.ConditionStatus, observedGeneration int64, reason, message string) metav1.Condition {
 	return metav1.Condition{
 		Type:               conditionType,
@@ -370,78 +302,6 @@ func NewCondition(conditionType string, status metav1.ConditionStatus, observedG
 		Reason:             reason,
 		Message:            message,
 	}
-}
-
-// Whether ConfiMapSync controller is operational and state successfully reconciled
-func (r *ConfigMapSyncReconciler) generateReadyStatusCondition(ctx context.Context, cms *v1alpha1.ConfigMapSync) metav1.Condition {
-	newCondition := metav1.Condition{
-		Type:               "Ready",
-		Status:             metav1.ConditionStatus("True"),
-		ObservedGeneration: cms.GetGeneration(),
-		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
-		Reason:  "AllSyncsAttempted",
-		Message: "source ConfigMap present and target configmap syncs attempted ",
-	}
-
-	if !r.RunState.sourceConfigMapFound || !r.RunState.targetConfigMapsSynced {
-		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
-		newCondition.Reason = "NotReady"
-		newCondition.Message = "ConfigMaps either not synced or source ConfigMap missing"
-	}
-
-	return newCondition
-}
-
-func (r *ConfigMapSyncReconciler) generateAllTargetsSyncedStatusCondition(ctx context.Context, cms *v1alpha1.ConfigMapSync) metav1.Condition {
-	newCondition := metav1.Condition{
-		Type:               "AllTargetsSynced",
-		Status:             metav1.ConditionStatus("True"),
-		ObservedGeneration: cms.GetGeneration(),
-		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
-		Reason:  "AllSyncsSuccessful",
-		Message: "Attempted to sync all target ConfigMaps",
-	}
-	// false alternative fields
-	if !r.RunState.targetConfigMapsSynced {
-		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
-		newCondition.Reason = "SyncsFailed"
-		newCondition.Message = "Failed to attempt to sync all target ConfigMaps"
-	}
-
-	return newCondition
-}
-
-// Status update should be the last operation in a reconcile, else you'll just produce conflicts with
-// concurrent or the same reconcile goroutine!
-func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context, newConditions []metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
-	log := log.FromContext(ctx).WithName("Reconcile>updateStatus")
-
-	// TODO should do the deepcopy here, in case a parallel goroutine in the future might touch this object as well
-	// => Basically AVOID modifiying shared cms object form the cache by .DeepCopy()-ing them first!
-	cmsCopy := cms //.DeepCopy()
-	for _, newCond := range newConditions {
-		meta.SetStatusCondition(&cmsCopy.Status.Conditions, newCond)
-	}
-
-	// .status should be able to be reconstituted from the state of the world
-	// so it's not a good idea to read from the status of the root object. Instead
-	// you should reconstruct it every run
-
-	// Update Status
-	// Update all conditions at once in one go, else we cet optimistic concurrency errors within the same reconcilition loop
-	// TODO: can you do a server-side apply here? Is that what Update does?
-	err := r.Status().Update(ctx, cmsCopy)
-	if err != nil {
-		// TODO: you can gracefully retry this here. For example with this:
-		// if apierrors.IsConflict(err) {
-		// 	log.V(1).Info("Conflict during status update, requeuing!")
-		// 	return ctrl.Result{Requeue: true}, nil
-		// }
-		log.Error(err, "Failed Updating .status of ConfigMapSync")
-		return err
-	}
-
-	return nil
 }
 
 // JSONString returns a JSON string of a value, or an error message.
@@ -468,10 +328,9 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, cm
 	log.V(1).Info("attempting to get sourceConfigMap")
 	sourceCM, err := r.getSourceConfigMap(ctx, cms)
 	if err != nil {
-		//r.RunState.sourceConfigMapFound = false
-		NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "newUpdateStatus ConfigMapMissing", "Source ConfigMap not found in namespace "+cms.Spec.Source.Namespace)
+		NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "ConfigMapMissing", "Source ConfigMap not found in namespace "+cms.Spec.Source.Namespace)
 		sourceCMSFoundCond.Status = metav1.ConditionFalse
-		sourceCMSFoundCond.Reason = "newUpdateStatus ConfigMapMissing"
+		sourceCMSFoundCond.Reason = "ConfigMapMissing"
 		sourceCMSFoundCond.Message = "Source ConfigMap not found in namespace " + cms.Spec.Source.Namespace
 
 		meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
