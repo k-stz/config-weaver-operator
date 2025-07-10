@@ -153,13 +153,16 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// saObjectKey := client.ObjectKeyFromObject(sa)
 
 	// Next we try to create a configmap
+	var configMapsSyncedCondition metav1.Condition = NewCondition("AllTargetsSynced", metav1.ConditionTrue, cms.Generation, "AllSyncsSuccessful", "")
 	if err := r.createConfigMaps(ctx, cms); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
-		r.RunState.targetConfigMapsSynced = false
-		r.updateStatus(ctx, cms)
+		configMapsSyncedCondition.Status = metav1.ConditionFalse
+		configMapsSyncedCondition.Reason = "SyncsFailed"
+		configMapsSyncedCondition.Message = "Failed to attempt to sync all target ConfigMaps"
+		meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
 		return ctrl.Result{}, err
 	}
-	r.RunState.targetConfigMapsSynced = true
+	meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
 
 	// cluster-logging-forwarder code uses this:
 	// removeStaleStatuses(r.Forwarder)
@@ -207,7 +210,7 @@ func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
 }
 
 func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
-	r.RunState.sourceConfigMapFound = false
+	// TODO: add condition serviceAccountFound
 	saName := cms.Spec.ServiceAccount.Name //
 	log := log.FromContext(ctx).WithName("getServiceAccountFromCMS")
 	log.V(1).Info("try retrieving sa from cms.spec.serviceAccount", "name", saName)
@@ -221,7 +224,6 @@ func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, 
 		log.Error(err, "Failed to retreive sa", "service account Name", saName)
 		return nil, err
 	}
-	r.RunState.sourceConfigMapFound = true
 	return sa, nil
 }
 
@@ -328,8 +330,8 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 
 	log := log.FromContext(ctx).WithName("updateStatus")
 	var conds []metav1.Condition
-	conds = append(conds, r.generateSourceFoundCondition(ctx, cms))
-	conds = append(conds, r.generateAllTargetsSyncedStatusCondition(ctx, cms))
+	//conds = append(conds, r.generateSourceFoundCondition(ctx, cms))
+	// conds = append(conds, r.generateAllTargetsSyncedStatusCondition(ctx, cms))
 	conds = append(conds, r.generateReadyStatusCondition(ctx, cms))
 
 	fmt.Println("## CURRENT CONDS len:", len(conds))
@@ -398,26 +400,6 @@ func (r *ConfigMapSyncReconciler) generateAllTargetsSyncedStatusCondition(ctx co
 	return newCondition
 }
 
-func (r *ConfigMapSyncReconciler) generateSourceFoundCondition(ctx context.Context, cms *v1alpha1.ConfigMapSync) metav1.Condition {
-	log := log.FromContext(ctx).WithName("Reconcile>generateSourceFoundCondition")
-
-	newCondition := metav1.Condition{
-		Type:               "SourceConfigMapFound",
-		Status:             metav1.ConditionTrue,
-		ObservedGeneration: cms.GetGeneration(),
-		// LastTransitionTime: metav1.NewTime(time.Now()), // Will be set by meta.SetStatusCondition(...)
-		Reason:  "ConfigMapFound",
-		Message: "Source ConfigMap found in namespace " + cms.Spec.Source.Namespace,
-	}
-	log.Info("RunState is sourceConfigMapFound " + fmt.Sprintf("%v", r.RunState.sourceConfigMapFound))
-	if !r.RunState.sourceConfigMapFound {
-		newCondition.Status = metav1.ConditionFalse // can be True, False or Unknown
-		newCondition.Reason = "ConfigMapMissing"
-		newCondition.Message = "Source ConfigMap not found in namespace " + cms.Spec.Source.Namespace
-	}
-	return newCondition
-}
-
 // Status update should be the last operation in a reconcile, else you'll just produce conflicts with
 // concurrent or the same reconcile goroutine!
 func (r *ConfigMapSyncReconciler) updateStatusWithConditions(ctx context.Context, newConditions []metav1.Condition, cms *v1alpha1.ConfigMapSync) error {
@@ -467,21 +449,34 @@ func MustMarshal(v interface{}) (value string) {
 
 // Fetch source ConfigMap and ensure the OwnerRef is set for and attempting to Update() it
 // Otherwise error out
-func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
+func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, cms *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
+
+	var sourceCMSFoundCond metav1.Condition = NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "", "")
+
 	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
 	log.V(1).Info("attempting to get sourceConfigMap")
-	sourceCM, err := r.getSourceConfigMap(ctx, configMapSync)
+	sourceCM, err := r.getSourceConfigMap(ctx, cms)
 	if err != nil {
-		r.RunState.sourceConfigMapFound = false
+		//r.RunState.sourceConfigMapFound = false
+		NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "newUpdateStatus ConfigMapMissing", "Source ConfigMap not found in namespace "+cms.Spec.Source.Namespace)
+		sourceCMSFoundCond.Status = metav1.ConditionFalse
+		sourceCMSFoundCond.Reason = "newUpdateStatus ConfigMapMissing"
+		sourceCMSFoundCond.Message = "Source ConfigMap not found in namespace " + cms.Spec.Source.Namespace
+
+		meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
 		return nil, err
 	}
-	r.RunState.sourceConfigMapFound = true
+	fmt.Println("### BEFORE ", cms.Status.Conditions)
+	sourceCMSFoundCond.Reason = "ConfigMapFound"
+	meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
+	fmt.Println("### AFTER ", cms.Status.Conditions)
+
 	// Not possible to set on namespaced object
 	// if err := r.setOwnerRef(configMapSync, sourceCM); err != nil {
 	// 	log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
 	// }
 
-	r.setOwnerMetadata(configMapSync, sourceCM)
+	r.setOwnerMetadata(cms, sourceCM)
 	log.V(3).Info("setOwnerMetadata on sourceCM", "sourceCM", sourceCM)
 
 	if err := r.Update(ctx, sourceCM); err != nil {
@@ -490,25 +485,24 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, co
 	return sourceCM, nil
 }
 
-func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMapSync *v1alpha1.ConfigMapSync) error {
+func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("createConfigMaps")
 
 	// TODO Do we have to do deepcopy here? we're not updating the cms here.
 	// My thinking: don't let another reconcile change the CMS as we iterate through the namespaces?
 	// But just another reconcile run would clean such a state up anyway?
-	configMapSync = configMapSync.DeepCopy()
-	nsList := configMapSync.Spec.SyncToNamespaces
+	nsList := cms.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
 
 	log.V(2).Info("Entered with SyncToNamespaces" + nsListStr)
 
-	sourceConfigMap, err := r.prepareSourceConfigMap(ctx, configMapSync)
+	sourceConfigMap, err := r.prepareSourceConfigMap(ctx, cms)
 	if err != nil {
 		return err
 	}
 
 	configMaps := []*v1.ConfigMap{}
-	for _, namespace := range configMapSync.Spec.SyncToNamespaces {
+	for _, namespace := range cms.Spec.SyncToNamespaces {
 		fmt.Println("Building ConfigMap for Namespace ", namespace)
 		cm := &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -520,7 +514,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, configMa
 		// if err := r.setOwnerRef(configMapSync, cm); err != nil {
 		// 	log.Error(err, "Failed setting OwnerRef")
 		// }
-		r.setOwnerMetadata(configMapSync, cm)
+		r.setOwnerMetadata(cms, cm)
 
 		configMaps = append(configMaps, cm)
 	}
