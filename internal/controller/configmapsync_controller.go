@@ -59,9 +59,10 @@ type RunState struct {
 const (
 	//allNamespaces is used for determining cluster scoped bindings
 	// used to create SAR requests
-	allNamespaces      = ""
-	ConditionTypeReady = "Ready"
-	ReasonUnknownState = "UnknownState"
+	allNamespaces                = ""
+	ConditionTypeReady           = "Ready"
+	ReasonUnknownState           = "UnknownState"
+	ReasonReconciliationComplete = "ReconciliationComplete"
 )
 
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
@@ -139,12 +140,16 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// First test if spec.serviceAccount is valid
 	sa, err := r.getServiceAccountFromCMS(ctx, cms)
 	if err != nil {
+		readyCond.Reason = "Couldn't get get ServiceAccount"
+		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
 	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
 	if err := r.validateServiceAccountPermissions(ctx, sa, cms); err != nil {
 		// TODO either in the method, or here, set the status.condition indicating the failed
 		// SA validation and the reason!
+		readyCond.Reason = "serviceaccount permission insufficient"
+		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
 
@@ -160,6 +165,8 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		configMapsSyncedCondition.Reason = "SyncsFailed"
 		configMapsSyncedCondition.Message = "Failed to attempt to sync all target ConfigMaps"
 		meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
+		readyCond.Reason = "ConfigMaps couldn't be synced"
+		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
 	meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
@@ -173,6 +180,10 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// }()
 
 	// r.updateStatus(ctx, cms)
+
+	// All successfully reconciled, golden path reached
+	readyCond.Reason = ReasonReconciliationComplete
+	readyCond.Status = metav1.ConditionTrue
 
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
