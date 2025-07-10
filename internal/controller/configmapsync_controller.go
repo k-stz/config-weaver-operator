@@ -273,14 +273,17 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 	return sar
 }
 
-// updateStatus assumes that througout a call of r.Reconcile() the .Status.Condition fields are
-// updated use meta.SetStatusCondition, as this addes new COnditions while updating existing ones.
-// updateStatus finally sets the ready condition, which is closed-over in Reconcile, such that
-// it is intially in the UnknwonState and throughout the Reconcile Run evaluated to its actual
-// value.
-// Finally updateStatus will update the .Status.Conditions field against the k8s cluster!
+// updateStatus is intended to be deferred within a single call to r.Reconcile().
+// During the reconciliation, individual condition fields in .Status.Conditions
+// should be updated using meta.SetStatusCondition, which ensures that existing
+// conditions are updated and new ones are appended as needed.
 //
-// Method only because we use the embeded struct client.Client for requests
+// The "Ready" condition is initialized as Unknown at the start of reconciliation
+// and is captured by a closure. As reconciliation progresses, this condition is
+// updated to reflect the final state (e.g., True, False, etc.).
+//
+// External impact: This function, when executed (typically via defer), will patch the .Status.Conditions
+// back to the Kubernetes API, ensuring the reconciled resource reflects its final status.
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync, ready metav1.Condition) {
 	log := log.FromContext(ctx).WithName("[updateStatus]")
 
@@ -291,7 +294,6 @@ func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha
 	if err != nil {
 		log.Error(err, "failed updating .status.conditions")
 	}
-
 }
 
 func NewCondition(conditionType string, status metav1.ConditionStatus, observedGeneration int64, reason, message string) metav1.Condition {
@@ -336,15 +338,8 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, cm
 		meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
 		return nil, err
 	}
-	fmt.Println("### BEFORE ", cms.Status.Conditions)
 	sourceCMSFoundCond.Reason = "ConfigMapFound"
 	meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
-	fmt.Println("### AFTER ", cms.Status.Conditions)
-
-	// Not possible to set on namespaced object
-	// if err := r.setOwnerRef(configMapSync, sourceCM); err != nil {
-	// 	log.Error(err, "Failed setting OwnerRef on Source ConfigMap in memory")
-	// }
 
 	r.setOwnerMetadata(cms, sourceCM)
 	log.V(3).Info("setOwnerMetadata on sourceCM", "sourceCM", sourceCM)
@@ -358,9 +353,6 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, cm
 func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("createConfigMaps")
 
-	// TODO Do we have to do deepcopy here? we're not updating the cms here.
-	// My thinking: don't let another reconcile change the CMS as we iterate through the namespaces?
-	// But just another reconcile run would clean such a state up anyway?
 	nsList := cms.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
 
@@ -373,7 +365,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1a
 
 	configMaps := []*v1.ConfigMap{}
 	for _, namespace := range cms.Spec.SyncToNamespaces {
-		fmt.Println("Building ConfigMap for Namespace ", namespace)
+		log.V(3).Info("Building ConfigMap for Namespace ", "namespace", namespace)
 		cm := &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      sourceConfigMap.GetName(),
@@ -381,16 +373,12 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1a
 			},
 			Data: sourceConfigMap.Data,
 		}
-		// if err := r.setOwnerRef(configMapSync, cm); err != nil {
-		// 	log.Error(err, "Failed setting OwnerRef")
-		// }
 		r.setOwnerMetadata(cms, cm)
 
 		configMaps = append(configMaps, cm)
 	}
 
-	// Check if configmap already
-	// In the Namespace that triggered this reconcile
+	// Check if configmap already in the Namespace that triggered this reconcile
 	log.V(1).Info("create/update ConfigMaps...")
 	for i, cm := range configMaps {
 		iter := strconv.Itoa(i)
@@ -443,7 +431,6 @@ func (r *ConfigMapSyncReconciler) getSourceConfigMap(ctx context.Context, cms *v
 // Updating an object with an ownerRef that has a namespaced owner will fail
 func (r *ConfigMapSyncReconciler) setOwnerRef(owner *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) error {
 	//	log := log.FromContext(ctx).WithName("setOwnerRef")
-
 	if err := ctrl.SetControllerReference(owner, cm, r.Scheme); err != nil {
 		return err
 	}
@@ -478,7 +465,6 @@ func (r *ConfigMapSyncReconciler) setOwnerMetadata(associatedCMS *v1alpha1.Confi
 	}
 	cm.GetLabels()["cmsOwnerName"] = namespacedName.Name
 	cm.GetLabels()["cmsOwnerNamespace"] = namespacedName.Namespace
-
 }
 
 // Triggers reconciliation only on UPDATE events AND when the ConfigMaps Data fields changed!
@@ -576,10 +562,5 @@ func (r *ConfigMapSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// You can set many more options here, for example the number
 		// of concurrent reconciles (default is one) with:
 		WithOptions(controller.Options{MaxConcurrentReconciles: 0}).
-		// Furthermore "Predicates" can be added using
-		// .WithEvntFilter(<predicate.Predicate>) which
-		// can filter events by type (create, update,delete)
-		// and content, mainly traffic to API server from
-		// Reconcile()
 		Complete(r)
 }
