@@ -760,7 +760,7 @@ type ConfigMapSyncSpec struct {
 Now the value will be defaulted whenever it is not supplied or deleted.
 
 ### ginkgo test regression
-At this point the ginkgo test failed because the serviceAccount was empty. Even though it is defaulted. And secondly because it doesn't even find the "default" service Account, so had to create it as well.
+At this point the ginkgo test failed because the serviceAccount was empty. Even though it is defaulted. No really,  tested this twice, maybe the `envtest` kube-apiserver doesn't do defaulting. And secondly because it doesn't even find the "default" service Account, so had to create it as well.
 
 Next it yielded a failling test with:
 "insufficient permissions on service account system:serviceaccount:default:default. Not authorized to create, update or delete configmaps in the following namespaces [target-ns default],"

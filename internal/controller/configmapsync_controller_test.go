@@ -219,7 +219,9 @@ var _ = Describe("ConfigMapSync Controller", func() {
 						},
 						// configure target ns here
 						SyncToNamespaces: []string{targetNamespace},
-						ServiceAccount:   weaverv1alpha1.ServiceAccount{Name: "default"},
+						// strange, it needs to be provided here even though it should
+						// be defaulted! I guess envtest environment doesn't do that?
+						ServiceAccount: weaverv1alpha1.ServiceAccount{Name: "default"},
 					},
 				}
 				Expect(k8sClient.Create(ctx, objectCMS)).To(Succeed())
