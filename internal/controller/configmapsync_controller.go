@@ -169,8 +169,8 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// 	updateStatus(r.Client, r.Forwarder, readyCond)
 	// }()
 
-	r.updateStatus(ctx, cms)
-	//r.updateStatus(ctx, &cms)
+	// r.updateStatus(ctx, cms)
+
 	// No error => stops Reconcile
 	return ctrl.Result{}, nil
 
@@ -292,10 +292,25 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 	return sar
 }
 
+// newUpdateStatus assumes that througout a call of r.Reconcile() the .Status.Condition fields are
+// updated use meta.SetStatusCondition, as this addes new COnditions while updating existing ones.
+// newUpdateStatus finally sets the ready condition, which is closed-over in Reconcile, such that
+// it is intially in the UnknwonState and throughout the Reconcile Run evaluated to its actual
+// value.
+// Finally updateStatus will update the .Status.Conditions field against the k8s cluster!
+//
 // Method only because we use the embeded struct client.Client for requests
 func (r *ConfigMapSyncReconciler) newUpdateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync, ready metav1.Condition) {
-	// cms
-	return
+	log := log.FromContext(ctx).WithName("[newUpdateStatus]")
+
+	// will add condition if missing; and update if present!
+	meta.SetStatusCondition(&cms.Status.Conditions, ready)
+
+	err := r.Status().Update(ctx, cms)
+	if err != nil {
+		log.Error(err, "failed updating .status.conditions")
+	}
+
 }
 
 func (r *ConfigMapSyncReconciler) updateStatus(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
