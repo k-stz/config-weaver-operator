@@ -27,6 +27,7 @@ import (
 
 	"github.com/k-stz/config-weaver-operator/api/v1alpha1"
 	weaverv1alpha1 "github.com/k-stz/config-weaver-operator/api/v1alpha1"
+	authenticationapi "k8s.io/api/authentication/v1"
 	authorizationapi "k8s.io/api/authorization/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -114,7 +115,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// First test if spec.serviceAccount is valid
 	sa, err := r.getServiceAccountFromCMS(ctx, cms)
 	if err != nil {
-		readyCond.Reason = "Couldn't get get ServiceAccount"
+		readyCond.Reason = "Couldn't get ServiceAccount"
 		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
@@ -128,7 +129,13 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Get Service Account Token on whose behalf the configmap synching will take place
-	r.getToken(ctx, sa)
+	// TODO next do something with the token
+	_, err = r.FetchServiceAccountToken(ctx, sa)
+	if err != nil {
+		readyCond.Reason = "Couldn't retrieve Token for ServiceAccount"
+		readyCond.Message = err.Error()
+		return ctrl.Result{}, err
+	}
 
 	// Testing stuff
 	// r.runExperiment(ctx)
@@ -181,7 +188,6 @@ func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
 	fmt.Println("### r.List:", nodeList)
 
 	// if err := r.List(ctx, &nodeList, ApplyToListFunc(f)); err != nil {
-	// 	fmt.Println("### r.List PANICs:", nodeList)
 
 	// 	panic(err)
 	// }
@@ -197,13 +203,54 @@ func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
 
 }
 
-func (r *ConfigMapSyncReconciler) getToken(ctx context.Context, sa *v1.ServiceAccount) (token string, error error) {
-	log := log.FromContext(ctx).WithName("[getToken]")
-	log.V(1).Info("attempting to retrive Token", "sa", ServiceaAccountUsername(sa))
+func (r *ConfigMapSyncReconciler) FetchServiceAccountToken(ctx context.Context, sa *v1.ServiceAccount) (token string, error error) {
+	log := log.FromContext(ctx).WithName("[FetchServiceAccountToken]")
+	log.V(1).Info("Fetching service account token for", "sa", ServiceaAccountUsername(sa))
+	token, err := r.createTokenRequestFor(ctx, sa)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
+func (r *ConfigMapSyncReconciler) createTokenRequestFor(ctx context.Context, sa *v1.ServiceAccount) (token string, err error) {
+	log := log.FromContext(ctx).WithName("[createTokenRequestFor]")
+	log.V(1).Info("Creating TokenRequest", "sa", ServiceaAccountUsername(sa))
 
 	//io.k8s.api.authentication.v1.TokenRequest
+	// kubectl create token sa-name -n sa-namespace
+	tokenRequest := &authenticationapi.TokenRequest{
+		Spec: authenticationapi.TokenRequestSpec{
+			// tokens can only be bound, as per API, to pods, nodes or serviceaccounts. Docs:
+			// https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/#bound-service-account-tokens
+			// BoundObjectRef: &authenticationapi.BoundObjectReference{
+			// 	//UID: sa.UID,
+			// },
+			// By default ExpirationSeconds for must kube-apiservers in the wild seems to be 1h; not changing that here
+			// ExpirationSeconds: *int64,
+		},
+	}
 
-	return
+	// TODO remove all token prints, this fully leaks the token in logs!
+	fmt.Println("### TokenRequest Before create:")
+	fmt.Println(MustMarshal(tokenRequest))
+
+	// have to fall back on the client-go clientset
+	// It provides a native way to create tokens on the serviceaccounts see below
+	// clientset, err := kubernetes.NewForConfig(r.Config)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("creating clientset: %w", err)
+	// }
+	//(*authenticationv1.TokenRequest, error)
+	tokenRequest, err = r.Clientset.CoreV1().ServiceAccounts(sa.Namespace).CreateToken(ctx, sa.Name, tokenRequest, metav1.CreateOptions{})
+	if err != nil {
+		log.Error(err, "unable to create TokenRequest")
+		return "", err
+	}
+	fmt.Println("### TokenRequest AFTER create:")
+	fmt.Println(MustMarshal(tokenRequest))
+	return tokenRequest.Status.Token, nil
 }
 
 func ServiceaAccountUsername(sa *v1.ServiceAccount) (username string) {
