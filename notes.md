@@ -818,4 +818,153 @@ func validateServiceAccountPermissions(k8sClient client.Client, inputs sets.Stri
 
 ## TokenRequest the ServiceAccount
 
+## Creating a `TokenRequest` in Kubernetes: Solving the Subresource Mystery
+
+When working with Kubernetes, I ran into an issue while trying to create a `TokenRequest` in my controller code using Kubebuilder. It threw errors that left me scratching my head, especially since the same operation worked seamlessly with the `kubectl` CLI. Let’s dive into what happened, why it happened, and how to properly create a `TokenRequest` in a Kubebuilder controller.
+
+### The kubectl Success Story
+Using kubectl, creating a bound token for a service account like `system:serviceaccout:defaul:default` is straightforward. For example:
+```bash
+# create bound token for `system:serviceaccout:defaul:default`
+$ kubectl create token default -n default
+eyJhbGciOiJSUzI1NiIsImtpZCI6I... # token is printed
+```
+
+You can also inspect the resulting TokenRequest object in YAML format:
+```bash
+$ kubectl create token default -n default -o yaml
+apiVersion: authentication.k8s.io/v1
+kind: TokenRequest
+metadata:
+  creationTimestamp: "2025-07-12T14:04:32Z"
+  name: default
+  namespace: default
+spec:
+  audiences:
+  - https://kubernetes.default.svc.cluster.local
+  - k3s
+  boundObjectRef: null
+  expirationSeconds: 3600
+status:
+  expirationTimestamp: "2025-07-12T15:04:32Z"
+  token: eyJhbGci...the-token-here
+```
+
+"Ok, this looks promising", I thought, "Let's craft an example YAML manifest from it":
+```yaml
+# file: tokenrequest.yaml"
+apiVersion: authentication.k8s.io/v1
+kind: TokenRequest
+metadata:
+  # creationTimestamp: "2025-07-12T14:02:49Z"
+  name: default
+  namespace: default
+spec:
+  audiences:
+  - https://kubernetes.default.svc.cluster.local
+  - k3s
+  boundObjectRef: null
+  expirationSeconds: 3600
+```
+I applied it with kubectl apply -f tokenrequest.yaml -o yaml, expecting the same result. Instead, I got this error:
+```bash
+$ kubectl create -f tokenrequest.yaml -o yaml
+error: resource mapping not found for name: "default" namespace: "default" from "tokenrequest.yaml": no matches for kind "TokenRequest" in version "authentication.k8s.io/v1"
+ensure CRDs are installed first
+```
+
+What gives? Surely the `TokenRequest` Resource exists, how else would the `kubectl` CLI make the request? 
+
+## The Mystery: Why Doesn’t TokenRequest Behave Like a Normal Resource?
+I initially suspected TokenRequest might be a special resource, like `TokenReview`, which is create-only and therefore not listable via `kubectl get`. However, checking the API resources with `kubectl api-resources` confirmed that TokenRequest isn’t even listed. This was a clue that something was different.
+
+
+To dig deeper, I inspected the OpenAPI spec for my cluster using:
+```bash
+kubectl get --raw /openapi/v2 | jq .
+```
+
+Or via the Kubernetes API Reference
+
+API Reference: https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-request-v1/
+At first glance it appears to be a normal resource the typical basic schema fields: apiVersion, kind, metadata, spec and status. The only hint that something is of is its allowed Operations section, it only allows this POST request:
+
+
+This command provides a tailored view of the resources available in your cluster. Alternatively, the Kubernetes API reference for TokenRequest offers more details. 
+
+At first glance it appeared to be a typical Kubernetes with the usual suspects in as schema fields: apiVersion, kind, metadata, spec and status. The critical deatil that revealed something was off was in the “Operations” section:
+```text
+HTTP Request
+
+POST /api/v1/namespaces/{namespace}/serviceaccounts/{name}/token
+```
+
+This endpoint indicates that TokenRequest isn’t a top-level resource like a Pod or ConfigMap. Instead, it’s a subresource of a ServiceAccount. Subresource provide special semantics for a parent resource. Like when you do magical stuff with on a Pod including `kubectl exec`, `kubectl log` or `kubectl port-forward`. Those are expressed as subresources on a Pod. 
+
+For example, `kubectl port-forward pods/my-pod 80` interacts with the `portforward` subresource of a Pod via a POST request to `/api/v1/namespaces/{namespace}/pods/{name}/portforward`. Similarly a `kubectl create token` sends a POST request to the "token" subresource of a ServiceAccount. Well and its schema must fit a `TokenRequest`.
+
+Key takeaway: 
+> TokenRequest is a POST-only subresource of a ServiceAccount, not a standalone resource. This explains why my YAML manifest failed—Kubernetes doesn’t recognize TokenRequest as a top-level resource you can apply.
+
+
+
+### Creating a TokenRequest in a Kubebuilder Controller
+Now that we understand TokenRequest is a subresource, how do we create one programmatically in a Kubebuilder controller? In my ConfigMapSync controller, I was already updating a subresource—the .status field — using `r.Status().Update(ctx, cms)`. Could I use a similar approach for `TokenRequest`? Unfortunately, the `controller-runtime` client (used by Kubebuilder) doesn’t provide a direct method for interacting with the token subresource. Instead, we need to use the lower-level Kubernetes Go client (in the `client-go` package), which offers a `CreateToken()` method.
+
+#### Step 1: Set up the Clientset
+To use client-go, we need a clientset in our reconciler. The Kubebuilder manager already provides a configuration we can use to create one. First extend the reconciler struct to include the clientset:
+```go
+type ConfigMapSyncReconciler struct {
+    client.Client
+    Scheme    *runtime.Scheme
+    Recorder  record.EventRecorder
+    Config    *rest.Config
+    Clientset *kubernetes.Clientset
+}
+```
+
+Then, in `cmd/main.go`, initialize the clientset and pass it to the reconciler during setup:
+```go
+	clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable creating clientset")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ConfigMapSyncReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Recorder:  mgr.GetEventRecorderFor("configmapsync-controller"),
+		Config:    mgr.GetConfig(),
+		Clientset: clientset,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ConfigMapSync")
+		os.Exit(1)
+	}
+```
+
+#### Step 2: Create the `TokenRequest`
+
+With the clientset ready, we can use its CreateToken method to create a TokenRequest for a given ServiceAccount. Here’s an abbreviated example implementation:
+```go
+func (r *ConfigMapSyncReconciler) createTokenRequestFor(ctx context.Context, sa *v1.ServiceAccount) (*authenticationapi.TokenRequest, error) {
+	// kubectl create token sa-name -n sa-namespace
+	tokenRequest := &authenticationapi.TokenRequest{
+		Spec: authenticationapi.TokenRequestSpec{...},
+	}
+	tokenRequest, err := r.Clientset.CoreV1().ServiceAccounts(sa.Namespace).CreateToken(ctx, sa.Name, tokenRequest, metav1.CreateOptions{})
+	// ...
+}
+```
+
+#### Why use `client-go`?
+The client-go library provides a typed, explicit interface for interacting with Kubernetes resources and subresources, unlike the more generic controller-runtime client. In this case, CreateToken directly maps to the /api/v1/namespaces/{namespace}/serviceaccounts/{name}/token endpoint, making it the perfect tool for the job.
+
+### Summary (TokenRequests creation): 
+The TokenRequest mystery boils down to its nature as a subresource of ServiceAccount, not a standalone resource. This explains why kubectl apply failed and why kubectl create token works—it’s targeting the token subresource endpoint. By using the client-go library’s CreateToken method, we can create TokenRequest objects programmatically in a Kubebuilder controller.
+
+This experience highlights the importance of understanding Kubernetes’ resource model, especially when working with subresources. If you’re building controllers, keep both controller-runtime and client-go in your toolkit—they complement each other for different use cases.
+
+
+
 ## Perform action on behalf of the ServiceAccount
