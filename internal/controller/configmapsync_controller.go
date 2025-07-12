@@ -34,6 +34,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -60,6 +62,10 @@ type ConfigMapSyncReconciler struct {
 	client.Client // from manager
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
+	Config        *rest.Config
+	// use for lower level requests when client.Client is insufficient
+	// For example when creating TokenRequest, a subreosurce of serviceaccount, the go-client has a naive funtion for that
+	Clientset kubernetes.Interface //  Clientset struct, returned by kubernetes.NewForConfig(r.Config)
 }
 
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
