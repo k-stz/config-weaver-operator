@@ -121,6 +121,9 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	// Get Service Account Token on whose behalf the configmap synching will take place
+	r.getToken(ctx, sa)
+
 	// Testing stuff
 	// r.runExperiment(ctx)
 	// saObjectKey := client.ObjectKeyFromObject(sa)
@@ -188,6 +191,19 @@ func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
 
 }
 
+func (r *ConfigMapSyncReconciler) getToken(ctx context.Context, sa *v1.ServiceAccount) (token string, error error) {
+	log := log.FromContext(ctx).WithName("[getToken]")
+	log.V(1).Info("attempting to retrive Token", "sa", ServiceaAccountUsername(sa))
+
+	//io.k8s.api.authentication.v1.TokenRequest
+
+	return
+}
+
+func ServiceaAccountUsername(sa *v1.ServiceAccount) (username string) {
+	return fmt.Sprintf("system:serviceaccount:%s:%s", sa.Namespace, sa.Name)
+}
+
 func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
 	// TODO: add condition serviceAccountFound
 	saName := cms.Spec.ServiceAccount.Name //
@@ -214,7 +230,7 @@ func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, 
 func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.Context, serviceAccount *v1.ServiceAccount, cms *v1alpha1.ConfigMapSync) error {
 	log := log.FromContext(ctx).WithName("validateServiceAccountPermissions")
 	var err error
-	var username = fmt.Sprintf("system:serviceaccount:%s:%s", serviceAccount.Namespace, serviceAccount.Name)
+	var username = ServiceaAccountUsername(serviceAccount)
 	log.V(1).Info("validating sa", "sa", username)
 
 	//readNamespace := cms.GetNamespace()
