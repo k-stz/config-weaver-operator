@@ -965,6 +965,18 @@ The TokenRequest mystery boils down to its nature as a subresource of ServiceAcc
 
 This experience highlights the importance of understanding Kubernetes’ resource model, especially when working with subresources. If you’re building controllers, keep both controller-runtime and client-go in your toolkit—they complement each other for different use cases.
 
+### Ginkgo-test fail
+TODO: Sadly after making TokenRequests work using the clientset go-client, the ginko-library now panics... I wonder if that's another limitation of it.
 
+Solution:
+- Because the reconciler-struct lacked the new Clientset field.
+```go
+controllerReconciler := &ConfigMapSyncReconciler{
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Clientset: clientset, // <- adding this fixed it
+			}
+
+```
 
 ## Perform action on behalf of the ServiceAccount

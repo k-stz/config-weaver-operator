@@ -235,7 +235,6 @@ func (r *ConfigMapSyncReconciler) createTokenRequestFor(ctx context.Context, sa 
 	// TODO remove all token prints, this fully leaks the token in logs!
 	fmt.Println("### TokenRequest Before create:")
 	fmt.Println(MustMarshal(tokenRequest))
-
 	// have to fall back on the client-go clientset
 	// It provides a native way to create tokens on the serviceaccounts see below
 	// clientset, err := kubernetes.NewForConfig(r.Config)

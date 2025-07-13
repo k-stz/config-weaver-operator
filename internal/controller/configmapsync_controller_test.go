@@ -233,8 +233,9 @@ var _ = Describe("ConfigMapSync Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ConfigMapSyncReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Clientset: clientset,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -247,8 +248,9 @@ var _ = Describe("ConfigMapSync Controller", func() {
 		It(fmt.Sprint("should successfully sync source ConfigMap ", sourceCMName, " to target ConfigMap in Namespace ", targetNamespace), func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ConfigMapSyncReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Clientset: clientset,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -280,8 +282,9 @@ var _ = Describe("ConfigMapSync Controller", func() {
 
 			By("Reconciling the ConfigMapSync Resource")
 			controllerReconciler := &ConfigMapSyncReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Clientset: clientset,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
