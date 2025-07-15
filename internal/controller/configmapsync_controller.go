@@ -58,6 +58,10 @@ const (
 	ReasonReconciliationComplete = "ReconciliationComplete"
 )
 
+var (
+	ErrTokenNotAuthenticated = errors.New("token not authenticated")
+)
+
 // ConfigMapSyncReconciler reconciles a ConfigMapSync object
 type ConfigMapSyncReconciler struct {
 	client.Client // from manager
@@ -108,6 +112,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// r.removeStaleStatuses() // maybe at this point
 	readyCond := NewCondition(ConditionTypeReady, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
 	defer func() {
+		// TODO the condition[*].Status field is not set with the failure cases!x
 		r.updateStatus(ctx, cms, readyCond)
 	}()
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", cms.Spec.TestNum))
@@ -123,19 +128,37 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.validateServiceAccountPermissions(ctx, sa, cms); err != nil {
 		// TODO either in the method, or here, set the status.condition indicating the failed
 		// SA validation and the reason!
-		readyCond.Reason = "serviceaccount permission insufficient"
+		readyCond.Reason = "InsufficientServiceAccountPermissions"
 		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
 
 	// Get Service Account Token on whose behalf the configmap synching will take place
 	// TODO next do something with the token
-	_, err = r.FetchServiceAccountToken(ctx, sa)
+	token, err := r.FetchServiceAccountToken(ctx, sa)
 	if err != nil {
-		readyCond.Reason = "Couldn't retrieve Token for ServiceAccount"
+		readyCond.Reason = "ServiceAccountTokenRetrievalFailed"
 		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
+
+	if err := r.validateServiceAccountToken(ctx, token); err != nil {
+		readyCond.Reason = "ServiceAccountValidationFailed"
+		readyCond.Message = err.Error()
+		return ctrl.Result{}, err
+	}
+
+	err = r.testRequestWithToken(ctx, token)
+	if err != nil {
+		panic(err)
+	}
+
+	// TODO: From this point we switch to the requested service account token
+	// for ConfigMap sync to avoid using the overly privileged controller token.
+	// This ensures tenant-level isolation, a core security freature of this
+	// operator.
+
+	// using the service account token
 
 	// Testing stuff
 	// r.runExperiment(ctx)
@@ -248,6 +271,7 @@ func (r *ConfigMapSyncReconciler) createTokenRequestFor(ctx context.Context, sa 
 		return "", err
 	}
 	fmt.Println("### TokenRequest AFTER create:")
+	// TODO remove this and all tokens leaking to console
 	fmt.Println(MustMarshal(tokenRequest))
 	return tokenRequest.Status.Token, nil
 }
@@ -257,7 +281,7 @@ func ServiceaAccountUsername(sa *v1.ServiceAccount) (username string) {
 }
 
 func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
-	// TODO: add condition serviceAccountFound
+	// TODO: add condition serviceAccountFound?
 	saName := cms.Spec.ServiceAccount.Name //
 	log := log.FromContext(ctx).WithName("getServiceAccountFromCMS")
 	log.V(1).Info("try retrieving sa from cms.spec.serviceAccount", "name", saName)
@@ -314,6 +338,84 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 	return nil
 }
 
+func (r *ConfigMapSyncReconciler) testRequestWithToken(ctx context.Context, token string) error {
+	log := log.FromContext(ctx).WithName("[testRequestWithToken]")
+	log.V(1).Info("create client.Client for using service account token", "token", token)
+
+	// lets create client that uses the given token to make requests with it
+	// newConfig := r.Config // this doesn't seem to work, in tests the requests can stil
+	// do things the serviceaccount token should not be authorized to in
+	// so we create the rest.Config from scratch, in case some unwanted fields are Clientset
+	newConfig := &rest.Config{
+		Host:        r.Config.Host, // API server endpoint
+		BearerToken: token,         // Use the provided service account token
+		TLSClientConfig: rest.TLSClientConfig{
+			Insecure: r.Config.TLSClientConfig.Insecure, // Copy insecure setting
+			CAData:   r.Config.TLSClientConfig.CAData,   // Copy CA certificate data
+			CAFile:   r.Config.TLSClientConfig.CAFile,   // Copy CA file (if used)
+		},
+	}
+
+	// Here we attempt to create a typed client as provided by kubernetes/controller-runtime
+	// the same kind used by Reconciler struct via its embedded client.Client
+	newClient, err := client.New(newConfig, client.Options{Scheme: r.Scheme})
+	if err != nil {
+		return fmt.Errorf("failed creating typed controller-runtime client with SA token: %w", err)
+	}
+	fmt.Println("### CREATED newclient successful")
+
+	// lets try to get a configmap!
+	// WORKS => TODO cleanup
+	cm := &v1.ConfigMap{}
+	nsKey := client.ObjectKey{
+		Namespace: "default",
+		Name:      "sync-me-cm",
+	}
+	err = newClient.Get(ctx, nsKey, cm)
+	if err != nil {
+		fmt.Println("Failed GET-ing with newClient, err:", err)
+		return fmt.Errorf("failed GET-ing configmap with token client: %w", err)
+	}
+	fmt.Println("### get request with newclient successful! Content:")
+	fmt.Println(MustMarshal(cm))
+
+	return nil
+
+}
+
+// token is the service account token returned by TokenRequest and used as Bearer-JWT-Token in
+// kube-apisever requests for a user.
+// returns nil, no error, when validation succeeded, else returns errors.
+//
+// possible senitinel error: ErrTokenNotAuthenticated
+func (r *ConfigMapSyncReconciler) validateServiceAccountToken(ctx context.Context, token string) error {
+	log := log.FromContext(ctx).WithName("validateServiceAccountToken")
+	log.V(1).Info("creating tokenreview")
+	tokenReview := createTokenReview(token)
+
+	if err := r.Create(ctx, tokenReview); err != nil {
+		return fmt.Errorf("Failed creating TokenReview: %w", err)
+	}
+	// TODO remove log leaking token
+	fmt.Println("### TokenReview Result:")
+	fmt.Println(MustMarshal(tokenReview))
+
+	if !tokenReview.Status.Authenticated {
+		// use sentinel error
+		return ErrTokenNotAuthenticated
+	}
+	return nil
+}
+
+func createTokenReview(token string) *authenticationapi.TokenReview {
+	tokenReview := &authenticationapi.TokenReview{
+		Spec: authenticationapi.TokenReviewSpec{
+			Token: token,
+		},
+	}
+	return tokenReview
+}
+
 // Adapted from https://github.com/openshift/cluster-logging-operator/internal/validations/observability/validate_permissions.go, licensed under the Apache License 2.0 just like this code
 func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAPIGroup string) *authorizationapi.SubjectAccessReview {
 	sar := &authorizationapi.SubjectAccessReview{
@@ -335,9 +437,6 @@ func createSubjectAccessReview(user, namespace, verb, resource, name, resourceAP
 			Name:      name,
 		}
 	}
-	// fmt.Printf("###SAR for user=%s ns=%s verb=%s resource=%s name=%s APIgrp=%s \n",
-	// 	user, namespace, verb, resource, name, resourceAPIGroup)
-	// fmt.Println(MustMarshal(sar))
 	return sar
 }
 
