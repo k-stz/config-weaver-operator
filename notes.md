@@ -965,7 +965,7 @@ The TokenRequest mystery boils down to its nature as a subresource of ServiceAcc
 
 This experience highlights the importance of understanding Kubernetes’ resource model, especially when working with subresources. If you’re building controllers, keep both controller-runtime and client-go in your toolkit—they complement each other for different use cases.
 
-### Ginkgo-test fail
+### Fix Ginkgo-test fail
 TODO: Sadly after making TokenRequests work using the clientset go-client, the ginko-library now panics... I wonder if that's another limitation of it.
 
 Solution:
@@ -980,3 +980,29 @@ controllerReconciler := &ConfigMapSyncReconciler{
 ```
 
 ## Perform action on behalf of the ServiceAccount
+You can test the service account token via curl. You can't use `kubectl proxy` as the proxy will authenticate you. Instead extract the actual kube-apiserver address and make the request as follows.
+
+```bash
+export token="put here the service account token to test. In this example from default sa"
+APISERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+# then make the request
+# WORKS:
+$ curl -H "Authorization: Bearer $token" -k $APISERVER/api/v1/namespaces/default/configmaps/sync-me-cm
+
+# And that's how it looks like when it is forbidden:
+$ curl -H "Authorization: Bearer $token" -k $APISERVER/api/v1/namespaces/kube-system/configmaps/sync-me-cm
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "configmaps \"sync-me-cm\" is forbidden: User \"system:serviceaccount:default:default\" cannot get resource \"configmaps\" in API group \"\" in the namespace \"kube-system\"",
+  "reason": "Forbidden",
+  "details": {
+    "name": "sync-me-cm",
+    "kind": "configmaps"
+  },
+  "code": 403
+}%     
+```
+
