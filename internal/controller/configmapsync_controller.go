@@ -342,27 +342,11 @@ func (r *ConfigMapSyncReconciler) testRequestWithToken(ctx context.Context, toke
 	log := log.FromContext(ctx).WithName("[testRequestWithToken]")
 	log.V(1).Info("create client.Client for using service account token", "token", token)
 
-	// lets create client that uses the given token to make requests with it
-	// newConfig := r.Config // this doesn't seem to work, in tests the requests can stil
-	// do things the serviceaccount token should not be authorized to in
-	// so we create the rest.Config from scratch, in case some unwanted fields are Clientset
-	newConfig := &rest.Config{
-		Host:        r.Config.Host, // API server endpoint
-		BearerToken: token,         // Use the provided service account token
-		TLSClientConfig: rest.TLSClientConfig{
-			Insecure: r.Config.TLSClientConfig.Insecure, // Copy insecure setting
-			CAData:   r.Config.TLSClientConfig.CAData,   // Copy CA certificate data
-			CAFile:   r.Config.TLSClientConfig.CAFile,   // Copy CA file (if used)
-		},
-	}
-
-	// Here we attempt to create a typed client as provided by kubernetes/controller-runtime
-	// the same kind used by Reconciler struct via its embedded client.Client
-	newClient, err := client.New(newConfig, client.Options{Scheme: r.Scheme})
+	scopedClient, err := r.NewScopedClientFromToken(ctx, token)
 	if err != nil {
-		return fmt.Errorf("failed creating typed controller-runtime client with SA token: %w", err)
+		return err
 	}
-	fmt.Println("### CREATED newclient successful")
+	log.V(2).Info("### Creating NewScopedClientFromToken successful")
 
 	// lets try to get a configmap!
 	// WORKS => TODO cleanup
@@ -371,7 +355,7 @@ func (r *ConfigMapSyncReconciler) testRequestWithToken(ctx context.Context, toke
 		Namespace: "default",
 		Name:      "sync-me-cm",
 	}
-	err = newClient.Get(ctx, nsKey, cm)
+	err = scopedClient.Get(ctx, nsKey, cm)
 	if err != nil {
 		fmt.Println("Failed GET-ing with newClient, err:", err)
 		return fmt.Errorf("failed GET-ing configmap with token client: %w", err)
@@ -381,6 +365,32 @@ func (r *ConfigMapSyncReconciler) testRequestWithToken(ctx context.Context, toke
 
 	return nil
 
+}
+
+// NewScopedClientFromToken returns a controller-runtime client that authenticates
+// using the provided Bearer token. The resulting client is restricted to the
+// permissions granted to the associated service account via RBAC.
+//
+// This enables multi-tenancy by ensuring that the ConfigMapSync operator performs
+// actions only within the access boundaries of the service account specified by
+// the ConfigMapSync resource.
+func (r *ConfigMapSyncReconciler) NewScopedClientFromToken(ctx context.Context, token string) (client.Client, error) {
+	log := log.FromContext(ctx).WithName("[newClientFormToken]")
+	log.V(3).Info("create controll-runtime typed client using service account token")
+	config := &rest.Config{
+		Host:        r.Config.Host, // API server endpoint
+		BearerToken: token,         // Use the provided service account token
+		TLSClientConfig: rest.TLSClientConfig{
+			Insecure: r.Config.TLSClientConfig.Insecure, // Copy insecure setting
+			CAData:   r.Config.TLSClientConfig.CAData,   // Copy CA certificate data
+			CAFile:   r.Config.TLSClientConfig.CAFile,   // Copy CA file (if used)
+		},
+	}
+	client, err := client.New(config, client.Options{Scheme: r.Scheme})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create typed controller-runtime client for given token: %w", err)
+	}
+	return client, nil
 }
 
 // token is the service account token returned by TokenRequest and used as Bearer-JWT-Token in
