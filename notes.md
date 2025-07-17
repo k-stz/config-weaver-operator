@@ -440,6 +440,49 @@ adding new conditions doesn't (and shouldn't) invalidate decisions based on exis
 
 
 
+## Scoped Clients vs. Impersonation (`kubectl --as <user>`) for Multitenancy
+While working on a multitenant feature of the ConfigMapSync controller, I initially implemented a solution that creates a new `controller-runtime` client for each tenant using a bearer token obtained via the Kubernetes TokenRequest API. The token is generated for a user-specified service account in the custom resource (CR). However, I started to question the efficiency of this approach, as it requires creating a new client for every service account and reconciliation loop, which could lead to resource overhead. This led me to consider Kubernetes impersonation (similar to `kubectl --as <user>), which sets an Impersonate-User HTTP header in API requests. I wondered if impersonation could allow reusing the existing client by dynamically swapping the identity, avoiding the need for multiple clients or token management.
+### My Current TokenRequest-Based Solution
+
+In my initial implementation, the user specifies a service account in the CR, and I use the `TokenRequest` API to generate a short-lived bearer token for that service account. I then create a `rest.Config`` with this token and instantiate a new controller-runtime client to perform operations on behalf of the service account.
+
+Why I like this approach:
+- Explicit permissions scoped to service account: The client’s actions are scoped to the RBAC permissions of the specified service account, making the authorization model clear and familiar to Kubernetes users.
+- Everyone know Kubernetes RBAC: By leverages standard Kubernetes RBAC, aligning with how users typically manage kubernetes permissions anyway.
+
+Drawbacks:
+- Resource overhead: Creating a new controller-runtime client for each tenant’s service account is resource-intensive, especially in a multitenant environment with frequent reconciliations.
+- Client management: Managing multiple clients (one per tenant) adds complexity, requiring caching or cleanup logic.
+- Token rotation: Tokens from the TokenRequest API are short-lived (typically 1 hour by default), requiring periodic refresh, which adds operational complexity.
+
+### Exploring Impersonation as an Alternative
+
+Impersonation, akin to `kubectl --as system:serviceaccount:namespace:name`, seemed like a promising alternative. Instead of creating a new client, I could configure the existing controller-runtime client to impersonate the desired service account by setting the Impersonate-User header in API requests. This would avoid generating tokens and potentially allow reusing the controller’s default client.
+
+Potential advantages of impersonation:
+
+- Client reuse: Impersonation modifies request headers, potentially allowing the same client to be used for different service accounts without creating new clients.
+- Namespace isolation: The controller’s service account can be granted impersonate permissions only for specific namespaces, enhancing security. (Note: The TokenRequest approach also allows scoping permissions, as the controller needs create permissions on tokenrequests subresources for specific service accounts, which can be similarly restricted.)
+- No token management: Impersonation eliminates the need to generate or rotate tokens, simplifying the implementation.
+
+
+Drawbacks of impersonation:
+
+- RBAC requirements: The controller’s service account needs impersonate permissions, which are powerful and must be carefully scoped to avoid security risks. However, the TokenRequest approach also requires significant permissions (create on tokenrequests), so the permission overhead is comparable.
+- Auditability: Impersonated actions are logged as performed by the controller’s service account, with the impersonated user noted in audit annotations. This makes tracing actions to specific tenants slightly less straightforward than with direct token-based authentication.
+- *Critical limitation*: Contrary to my initial hope, *impersonation does not allow dynamic reconfiguration of the existing client on a per-request basis => No client reuse.* In client-go and controller-runtime, impersonation is configured at the `rest.Config` level, requiring a new client for each impersonated identity. This means we still need to manage multiple clients, similar to the TokenRequest approach.
+
+Key insight: No Dynamic Impersonation in `controller-runtime`
+
+As far as I could gather anyway.
+
+### Potential improvements
+So we will stick with the TokenRequest and BearerToken client creation but we can
+- cache clients: thus reducing wasted resources
+- cache tokens: thus also optimize token rotation 
+
+
+
 # Deployment
 The controller needs access to the Kubernetes-API, if that's the case it can be deployed. So this can be:
 - Inside the cluster inside a pod
@@ -565,7 +608,9 @@ The following test cases are implemented to prove the basic contract that the Co
 
 # Multitenancy implementation 
 This section documents the necessary steps and concepts needed to add multitenancy to the operator. Before we consider the steps, lets consider the initital starting position the operator was prior to adding any multitenancy features: 
-THe primary resource `ConfigMapSync` was clusterscoped and it described for the operator a source ConfigMap it shall sync to a list of given target namespaces. There was no controlmechanism in place as it allows users to overwritte or copy each others ConfigMaps across the whole cluster. So how can we add multitenancy to this setup?
+The primary resource `ConfigMapSync` was clusterscoped and it described for the operator a source ConfigMap it shall sync to a list of given target namespaces. There was no mechanism in place to prevent users from overwritting or copying over each others ConfigMaps. 
+
+So what are necessary to add multitenancy to the cluster?
 
 ## Namespaced `ConfigMapSync`
 - When switching form Cluster-scoped to namespace scoped, the `envtest`-testsuite loudly failed stating that the codemarker  must be `Namespaced` (not `Namespace` as was the typo) for the ConfigMapSync struct. Updated codemark: `//+kubebuilder:resource:scope=Namespaced,path=configmapsyncs,shortName=cms;cmsync`
@@ -1006,45 +1051,4 @@ $ curl -H "Authorization: Bearer $token" -k $APISERVER/api/v1/namespaces/kube-sy
 }%     
 ```
 
-## Scoped Clients vs. Impersonation (`kubectl --as <user>`) for Multitenancy
-While working on a multitenant feature of the ConfigMapSync controller, I initially implemented a solution that creates a new `controller-runtime` client for each tenant using a bearer token obtained via the Kubernetes TokenRequest API. The token is generated for a user-specified service account in the custom resource (CR). However, I started to question the efficiency of this approach, as it requires creating a new client for every service account and reconciliation loop, which could lead to resource overhead. This led me to consider Kubernetes impersonation (similar to `kubectl --as <user>), which sets an Impersonate-User HTTP header in API requests. I wondered if impersonation could allow reusing the existing client by dynamically swapping the identity, avoiding the need for multiple clients or token management.
-
-### My Current TokenRequest-Based Solution
-
-In my initial implementation, the user specifies a service account in the CR, and I use the TokenRequest API to generate a short-lived bearer token for that service account. I then create a rest.Config with this token and instantiate a new controller-runtime client to perform operations on behalf of the service account.
-
-Why I like this approach:
-- Explicit permissions scoped to service account: The client’s actions are scoped to the RBAC permissions of the specified service account, making the authorization model clear and familiar to Kubernetes users.
-- Everyone know Kubernetes RBAC: By leverages standard Kubernetes RBAC, aligning with how users typically manage kubernetes permissions anyway.
-
-Drawbacks:
-- Resource overhead: Creating a new controller-runtime client for each tenant’s service account is resource-intensive, especially in a multitenant environment with frequent reconciliations.
-- Client management: Managing multiple clients (one per tenant) adds complexity, requiring caching or cleanup logic.
-- Token rotation: Tokens from the TokenRequest API are short-lived (typically 1 hour by default), requiring periodic refresh, which adds operational complexity.
-
-**Exploring Impersonation as an Alternative**
-
-Impersonation, akin to `kubectl --as system:serviceaccount:namespace:name`, seemed like a promising alternative. Instead of creating a new client, I could configure the existing controller-runtime client to impersonate the desired service account by setting the Impersonate-User header in API requests. This would avoid generating tokens and potentially allow reusing the controller’s default client.
-
-Potential advantages of impersonation:
-
-- Client reuse: Impersonation modifies request headers, potentially allowing the same client to be used for different service accounts without creating new clients.
-- Namespace isolation: The controller’s service account can be granted impersonate permissions only for specific namespaces, enhancing security. (Note: The TokenRequest approach also allows scoping permissions, as the controller needs create permissions on tokenrequests subresources for specific service accounts, which can be similarly restricted.)
-- No token management: Impersonation eliminates the need to generate or rotate tokens, simplifying the implementation.
-
-
-Drawbacks of impersonation:
-
-- RBAC requirements: The controller’s service account needs impersonate permissions, which are powerful and must be carefully scoped to avoid security risks. However, the TokenRequest approach also requires significant permissions (create on tokenrequests), so the permission overhead is comparable.
-- Auditability: Impersonated actions are logged as performed by the controller’s service account, with the impersonated user noted in audit annotations. This makes tracing actions to specific tenants slightly less straightforward than with direct token-based authentication.
-- *Critical limitation*: Contrary to my initial hope, *impersonation does not allow dynamic reconfiguration of the existing client on a per-request basis => No client reuse.* In client-go and controller-runtime, impersonation is configured at the `rest.Config` level, requiring a new client for each impersonated identity. This means we still need to manage multiple clients, similar to the TokenRequest approach.
-
-Key insight: No Dynamic Impersonation in `controller-runtime`
-
-As far as I could gather anyway.
-
-**Potential improvements**
-So we will stick with the TokenRequest and BearerToken client creation but we can
-- cache clients: thus reducing wasted resources
-- cache tokens: thus also optimize token rotation 
 
