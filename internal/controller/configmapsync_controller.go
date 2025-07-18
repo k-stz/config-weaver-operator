@@ -120,7 +120,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// First test if spec.serviceAccount is valid
 	sa, err := r.getServiceAccountFromCMS(ctx, cms)
 	if err != nil {
-		readyCond.Reason = "Couldn't get ServiceAccount"
+		readyCond.Reason = "ServiceAccountNotFound"
 		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
@@ -148,10 +148,10 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	err = r.testRequestWithToken(ctx, token)
-	if err != nil {
-		panic(err)
-	}
+	// err = r.testRequestWithToken(ctx, token)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// TODO: From this point we switch to the requested service account token
 	// for ConfigMap sync to avoid using the overly privileged controller token.
@@ -164,15 +164,22 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// r.runExperiment(ctx)
 	// saObjectKey := client.ObjectKeyFromObject(sa)
 
+	scopedClient, err := r.NewScopedClientFromToken(ctx, token)
+	if err != nil {
+		readyCond.Reason = "FailedObtainingScopedKubernetesClientFromToken"
+		readyCond.Message = err.Error()
+		return ctrl.Result{}, err
+	}
+
 	// Next we try to create a configmap
 	var configMapsSyncedCondition metav1.Condition = NewCondition("AllTargetsSynced", metav1.ConditionTrue, cms.Generation, "AllSyncsSuccessful", "")
-	if err := r.createConfigMaps(ctx, cms); err != nil {
+	if err := createConfigMaps(ctx, scopedClient, cms); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
 		configMapsSyncedCondition.Status = metav1.ConditionFalse
 		configMapsSyncedCondition.Reason = "SyncsFailed"
 		configMapsSyncedCondition.Message = "Failed to attempt to sync all target ConfigMaps"
 		meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
-		readyCond.Reason = "ConfigMaps couldn't be synced"
+		readyCond.Reason = "FailedSyncingConfigMaps"
 		readyCond.Message = err.Error()
 		return ctrl.Result{}, err
 	}
@@ -499,13 +506,13 @@ func MustMarshal(v interface{}) (value string) {
 
 // Fetch source ConfigMap and ensure the OwnerRef is set for and attempting to Update() it
 // Otherwise error out
-func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, cms *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
+func prepareSourceConfigMap(ctx context.Context, k8sClient client.Client, cms *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
 
 	var sourceCMSFoundCond metav1.Condition = NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "", "")
 
 	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
 	log.V(1).Info("attempting to get sourceConfigMap")
-	sourceCM, err := r.getSourceConfigMap(ctx, cms)
+	sourceCM, err := getSourceConfigMap(ctx, k8sClient, cms)
 	if err != nil {
 		NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "ConfigMapMissing", "Source ConfigMap not found in namespace "+cms.Spec.Source.Namespace)
 		sourceCMSFoundCond.Status = metav1.ConditionFalse
@@ -518,24 +525,24 @@ func (r *ConfigMapSyncReconciler) prepareSourceConfigMap(ctx context.Context, cm
 	sourceCMSFoundCond.Reason = "ConfigMapFound"
 	meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
 
-	r.setOwnerMetadata(cms, sourceCM)
+	setOwnerMetadata(cms, sourceCM)
 	log.V(3).Info("setOwnerMetadata on sourceCM", "sourceCM", sourceCM)
 
-	if err := r.Update(ctx, sourceCM); err != nil {
+	if err := k8sClient.Update(ctx, sourceCM); err != nil {
 		log.Error(err, "Failed setting OwnerMetadata on Source ConfigMap")
 	}
 	return sourceCM, nil
 }
 
-func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1alpha1.ConfigMapSync) error {
-	log := log.FromContext(ctx).WithName("createConfigMaps")
+func createConfigMaps(ctx context.Context, k8sClient client.Client, cms *v1alpha1.ConfigMapSync) error {
+	log := log.FromContext(ctx).WithName("[createConfigMaps]")
 
 	nsList := cms.Spec.SyncToNamespaces
 	nsListStr := fmt.Sprintf("%s", nsList)
 
 	log.V(2).Info("Entered with SyncToNamespaces" + nsListStr)
 
-	sourceConfigMap, err := r.prepareSourceConfigMap(ctx, cms)
+	sourceConfigMap, err := prepareSourceConfigMap(ctx, k8sClient, cms)
 	if err != nil {
 		return err
 	}
@@ -550,7 +557,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1a
 			},
 			Data: sourceConfigMap.Data,
 		}
-		r.setOwnerMetadata(cms, cm)
+		setOwnerMetadata(cms, cm)
 
 		configMaps = append(configMaps, cm)
 	}
@@ -566,11 +573,11 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1a
 		}
 
 		cmCluster := cm.DeepCopy()
-		log.V(1).Info(iter + ". r.Get() with Objectkey: " + nsKey.String())
-		if err := r.Get(ctx, nsKey, cmCluster); err != nil {
-			log.Info(iter + ". r.Get() failed; testing if IsNotFound:")
+		log.V(1).Info(iter + ". k8sClient.Get() with Objectkey: " + nsKey.String())
+		if err := k8sClient.Get(ctx, nsKey, cmCluster); err != nil {
+			log.Info(iter + ". k8sClient.Get() failed; testing if IsNotFound:")
 			if apierrors.IsNotFound(err) {
-				err := r.Create(ctx, cm)
+				err := k8sClient.Create(ctx, cm)
 				if err != nil {
 					log.Error(err, "failed creating configmap in namespace "+cm.Namespace)
 					return err
@@ -581,7 +588,7 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1a
 		} else {
 			log.Info(iter + ".r.Get() successful, current cluster cm testnum:" + cmCluster.Data["testNum"])
 		}
-		if err := r.Update(ctx, cm); err != nil {
+		if err := k8sClient.Update(ctx, cm); err != nil {
 			log.Error(err, iter+". r.Update(ctx, cm) failed")
 		}
 		log.Info(iter + ".ConfigMap " + cm.Name + " Updated. This iteration finished.")
@@ -590,13 +597,13 @@ func (r *ConfigMapSyncReconciler) createConfigMaps(ctx context.Context, cms *v1a
 	return nil
 }
 
-func (r *ConfigMapSyncReconciler) getSourceConfigMap(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ConfigMap, error) {
+func getSourceConfigMap(ctx context.Context, k8sClient client.Client, cms *v1alpha1.ConfigMapSync) (*v1.ConfigMap, error) {
 	cm := &v1.ConfigMap{}
 	nsKey := client.ObjectKey{
 		Namespace: cms.Spec.Source.Namespace,
 		Name:      cms.Spec.Source.Name,
 	}
-	if err := r.Get(ctx, nsKey, cm); err != nil {
+	if err := k8sClient.Get(ctx, nsKey, cm); err != nil {
 		return cm, err
 	}
 	return cm, nil
@@ -623,7 +630,7 @@ func (r *ConfigMapSyncReconciler) setOwnerRef(owner *v1alpha1.ConfigMapSync, cm 
 // to back refernce a configmap to the namespace and name of the owning ConfigMapSync
 //
 // Isn't the labels/annotations, only set, you need to call Update separately!
-func (r *ConfigMapSyncReconciler) setOwnerMetadata(associatedCMS *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) {
+func setOwnerMetadata(associatedCMS *v1alpha1.ConfigMapSync, cm *v1.ConfigMap) {
 	name := associatedCMS.GetName()
 	namespace := associatedCMS.GetNamespace()
 	namespacedName := types.NamespacedName{
