@@ -1051,4 +1051,7 @@ $ curl -H "Authorization: Bearer $token" -k $APISERVER/api/v1/namespaces/kube-sy
 }%     
 ```
 
+## Adding Scoped Clients
+Adding scoped clients form service account tokens finally allows us to truely make request scoped to the RBAC permissions of the given service acocunt. Next we needed to change the api of the core function `createConfigMaps` extending it by the paramter `k8sClient client.Client` and making it a function instead of a method. Prevously as a method it used the Reconciler struct's client for all the request.
 
+Funny on the home stretch I noticed that the basic core feature didn't work, as the service account had update, create and edit permission but not get permission - those are needed to at least as you always need to at least fetch the source config map!

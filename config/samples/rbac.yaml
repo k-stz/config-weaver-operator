@@ -15,6 +15,11 @@ rules:
   resources:
   - configmaps
   verbs:
+  # Funny, only on the final stretch to multitenancy
+  # I've noticed that the role lacked a basic verb: get.
+  # needed by core configmap sync mechanic!
+  - get
+  - list
   - create
   - update
   - delete

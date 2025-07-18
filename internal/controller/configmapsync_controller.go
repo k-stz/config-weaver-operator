@@ -589,7 +589,7 @@ func createConfigMaps(ctx context.Context, k8sClient client.Client, cms *v1alpha
 			log.Info(iter + ".r.Get() successful, current cluster cm testnum:" + cmCluster.Data["testNum"])
 		}
 		if err := k8sClient.Update(ctx, cm); err != nil {
-			log.Error(err, iter+". r.Update(ctx, cm) failed")
+			log.Error(err, iter+". k8sClient.Update(ctx, cm) failed")
 		}
 		log.Info(iter + ".ConfigMap " + cm.Name + " Updated. This iteration finished.")
 	}
