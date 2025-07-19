@@ -1048,7 +1048,7 @@ $ curl -H "Authorization: Bearer $token" -k $APISERVER/api/v1/namespaces/kube-sy
     "kind": "configmaps"
   },
   "code": 403
-}%     
+}%
 ```
 
 ## Adding Scoped Clients
@@ -1060,12 +1060,52 @@ Funny on the home stretch I noticed that the basic core feature didn't work, as 
 ## Fixing the Ginkgo-Test-Suite. Again.
 After adding the `r.NewScopedClientFromToken()` call to the main reconciler loop, the Ginkgo test suite started failing again. This time, the panic was caused by the Reconciler struct being instantiated in the test code without the `Config` field, which `NewScopedClientFromToken()` relies on to create a scoped Kubernetes client.
 
-What made debugging harder was that the failure surfaced as an unhelpful panic without pointing to the exact line that caused it. After gradually narrowing things down, I discovered that the crash was due to accessing the missing `r.Config` field on the Reconciler struct.
+What made debugging harder was that the failure surfaced as an unhelpful panic without pointing to the exact line that caused it. After gradually narrowing things down, I discovered that the crash was due to accessing the missing `Config` field on the Reconciler struct.
 
 This debugging session taught me two important lessons:
 
 - **Validate input early**: It's a good idea to check if required fields on the reconciler are initialized, especially when used across multiple contexts—such as in production code and test code. Just because a field is always set in one place doesn’t mean it will be in others.
 
-- **Avoid duplication when constructing test reconciler instances**: I’m currently creating the reconciler struct in multiple places throughout the test suite. As a result, each time a new field like Config or Clientset is added to the reconciler, it has to be updated in several places, making tests harder to maintain.
+- **Avoid duplication**: I’m currently creating the reconciler struct in multiple places throughout the test suite. As a result, each time a new field like `Config` or `Clientset` is added to the reconciler, it has to be updated in several places, making tests harder to maintain.
 
-In hindsight, I also think this was the right time to learn and apply these lessons. Abstractions tend to emerge naturally—not by preemptive design, but by repetition. Once you’ve done something a few times, you begin to see the patterns worth abstracting. That's when the shape of reusable code becomes clearer, informed by real usage and multiple perspectives gained through working in the domain. So basically DRY after multiple encounters.
+In hindsight, I also think this was the right time to learn and apply these lessons. Abstractions tend to emerge naturally — not by preemptive design, but by repetition. Once you’ve done something a few times, you begin to see the patterns worth abstracting. That's when the shape of reusable code becomes clearer, informed by real usage and multiple perspectives gained through working in the domain. DRY only after some rinse and repeat.
+
+
+## Adding Finalizer logic
+TheAt this point, the controller is nearly complete — the last missing piece is cleanup logic. And by "cleanup," I mean implementing proper deletion behavior.
+
+Right now, when a namespace is removed from the list of target namespaces, or when the entire ConfigMapSync object is deleted, the synced ConfigMaps are left untouched. I'd like to fix that by ensuring the corresponding ConfigMaps are cleaned up from their respective namespaces in both cases. 
+
+When `ConfigMapSync` was still cluster-scoped, we could rely on Kubernetes’ built-in Garbage Collection. The synced ConfigMaps had `OwnerReferences`, and once the `ConfigMapSync` object was deleted, those references pointed to a missing object — a condition that triggers automatic cleanup.
+
+But now that `ConfigMapSync` is namespaced, we can’t use `OwnerReferences` for  cluster-scoped deletion. Kubernetes only supports garbage collection when the owner (`ConfigMapSync`) and dependent (`ConfigMap`) are in the same namespace, or when both are cluster-scoped.
+
+This is where finalizers come in. Finalizers are listed under `.metadata.finalizers`, and as long as this list is non-empty, deletion of the object is paused. This gives the controller a chance to perform any necessary cleanup (like deleting synced ConfigMaps) before the object is fully removed. Once cleanup is done, we simply remove the finalizer, allowing the deletion to complete.
+
+We will use a finalizer on the `ConfigMapSync` object. As long as the finalizer is present, the object will remain in a *pending deletion* state. During this phase, the controller will ensure that all synced ConfigMaps — except the source ConfigMap — are deleted. Once this cleanup is complete, the controller removes the finalizer, allowing Kubernetes to fully delete the ConfigMapSync object.
+
+In the meantime our controller will ensure all ConfigMaps, but the source Config Map, are deleted. Once this cleanup is complete, the controller removes the finalizer, allowing Kubernetes will conclude the cleanup of the `ConfigMapSync` object.
+
+### Handling removed sync-to target namespaces
+
+Handling the case where a namespace is removed from the list of target namespaces is a bit more complex and less deterministic. When a watch event triggers reconciliation, the controller fetches the updated ConfigMapSync object — but at that point, it only contains the new list of target namespaces. So how can the controller tell which namespace was removed?
+
+In Kubernetes controller design, it’s best practice to respond to watch events and then fetch the current state from the cluster. This means we don't have access to the previous state unless we explicitly store it. As a result, there are two possible approaches:
+
+1. Store the previously synced namespaces in a separate field (e.g., in the status subresource).
+
+2. Attempt to infer deletions via a full cluster lookup — for example, scanning all ConfigMaps and checking for a specific owner annotation. However, this is likely too expensive and inefficient at scale.
+
+The first approach is discouraged by the Kubernetes API convention. It states that the `.status` field should be entirely reconstructable from the current state of the cluster. It should reflect observed state, not contain required input for reconciliation.
+
+**Why `.status` shouldn't be used for Past-State Tracking**
+- ❌ Non-rebuildable:	You can't reconstruct `.status` if the controller restarts or misses updates — it's not versioned, and you don’t get a diff from previous state.
+- ❌ Order-sensitive:	Controllers might run reconcile in any order. If .status is stale or lagging, your logic can misfire.
+- ❌ Breaks idempotency:	Controllers should produce the same result every reconcile. Using .status as an input makes it order-sensitive and side-effect-prone.
+- ❌ Not user-owned:	.status is managed by the controller. Users should never edit it, so you can't rely on it to contain critical business logic inputs.
+
+That's why Kubernetes controllers should be designed to compute `.status` from the actual cluster state - never the other way around.
+
+Based on this analysis, I see two possible solutions going ahead:
+- Do nothing: Skip implementing cleanup for individual ConfigMaps, allowing them to become "stray cats" in the cluster. The main benefit of this approach is that it's already implemented! 😄
+- Implement proper cleanup using a full-cluster lookup (thisolution "2." proposed above): This aligns with best practices by actively identifying and deleting orphaned ConfigMaps. Depending on performance needs, this could potentially be optimized using indexed lookups to reduce the cost of scanning all ConfigMaps.
