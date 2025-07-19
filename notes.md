@@ -1055,3 +1055,17 @@ $ curl -H "Authorization: Bearer $token" -k $APISERVER/api/v1/namespaces/kube-sy
 Adding scoped clients form service account tokens finally allows us to truely make request scoped to the RBAC permissions of the given service acocunt. Next we needed to change the api of the core function `createConfigMaps` extending it by the paramter `k8sClient client.Client` and making it a function instead of a method. Prevously as a method it used the Reconciler struct's client for all the request.
 
 Funny on the home stretch I noticed that the basic core feature didn't work, as the service account had update, create and edit permission but not get permission - those are needed to at least as you always need to at least fetch the source config map!
+
+
+## Fixing the Ginkgo-Test-Suite. Again.
+After adding the `r.NewScopedClientFromToken()` call to the main reconciler loop, the Ginkgo test suite started failing again. This time, the panic was caused by the Reconciler struct being instantiated in the test code without the `Config` field, which `NewScopedClientFromToken()` relies on to create a scoped Kubernetes client.
+
+What made debugging harder was that the failure surfaced as an unhelpful panic without pointing to the exact line that caused it. After gradually narrowing things down, I discovered that the crash was due to accessing the missing `r.Config` field on the Reconciler struct.
+
+This debugging session taught me two important lessons:
+
+- **Validate input early**: It's a good idea to check if required fields on the reconciler are initialized, especially when used across multiple contexts—such as in production code and test code. Just because a field is always set in one place doesn’t mean it will be in others.
+
+- **Avoid duplication when constructing test reconciler instances**: I’m currently creating the reconciler struct in multiple places throughout the test suite. As a result, each time a new field like Config or Clientset is added to the reconciler, it has to be updated in several places, making tests harder to maintain.
+
+In hindsight, I also think this was the right time to learn and apply these lessons. Abstractions tend to emerge naturally—not by preemptive design, but by repetition. Once you’ve done something a few times, you begin to see the patterns worth abstracting. That's when the shape of reusable code becomes clearer, informed by real usage and multiple perspectives gained through working in the domain. So basically DRY after multiple encounters.
