@@ -82,10 +82,6 @@ type ConfigMapSyncReconciler struct {
 // It runs each time an event occurs on a watched CR/resource and will return some
 // value dependingon whether those state match or not
 // Every Controller has a Reconciler object with a Reconcile method
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the ConfigMapSync object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
@@ -103,16 +99,16 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, err
 		}
 	}
-	// we create the DeepCopy right of the bat Because the read CMS comes from
-	// the a "shared informer" cache (controller-runtime construct) we create a
-	// deepdopy here such that concurrent Reconcile invokation don't share this
-	// memory avoiding race-conditions
+	// we create the DeepCopy right of the bat Because the read CMS comes from a
+	// "shared informer" cache (controller-runtime construct) we create a
+	// deepcopy to avoid concurrent Reconcile invokation sharing the receiver structs
+	// avoiding struct causing race-conditions
 	cms = cms.DeepCopy()
 
 	// r.removeStaleStatuses() // maybe at this point
 	readyCond := NewCondition(ConditionTypeReady, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
 	defer func() {
-		// TODO the condition[*].Status field is not set with the failure cases!x
+		// TODO the condition[*].Status field is not set with the failure cases!
 		r.updateStatus(ctx, cms, readyCond)
 	}()
 	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", cms.Spec.TestNum))
@@ -134,7 +130,6 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Get Service Account Token on whose behalf the configmap synching will take place
-	// TODO next do something with the token
 	token, err := r.FetchServiceAccountToken(ctx, sa)
 	if err != nil {
 		readyCond.Reason = "ServiceAccountTokenRetrievalFailed"
@@ -148,22 +143,10 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// err = r.testRequestWithToken(ctx, token)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// TODO: From this point we switch to the requested service account token
-	// for ConfigMap sync to avoid using the overly privileged controller token.
-	// This ensures tenant-level isolation, a core security freature of this
+	// The `scopedClient` is scoped to the permissions of the token. While the token
+	// holds the identity of the cms.spec.serviceaccount!
+	// This aims to ensures tenant-level isolation, a core security freature of this
 	// operator.
-
-	// using the service account token
-
-	// Testing stuff
-	// r.runExperiment(ctx)
-	// saObjectKey := client.ObjectKeyFromObject(sa)
-
 	scopedClient, err := r.NewScopedClientFromToken(ctx, token)
 	if err != nil {
 		readyCond.Reason = "FailedObtainingScopedKubernetesClientFromToken"
@@ -171,7 +154,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// Next we try to create a configmap
+	// Here the main feature of the Operator is executing: syncing configmap accross namespaces
 	var configMapsSyncedCondition metav1.Condition = NewCondition("AllTargetsSynced", metav1.ConditionTrue, cms.Generation, "AllSyncsSuccessful", "")
 	if err := createConfigMaps(ctx, scopedClient, cms); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
@@ -192,8 +175,6 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// defer func() {
 	// 	updateStatus(r.Client, r.Forwarder, readyCond)
 	// }()
-
-	// r.updateStatus(ctx, cms)
 
 	// All successfully reconciled, golden path reached
 	readyCond.Reason = ReasonReconciliationComplete
@@ -325,6 +306,7 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 	for _, ns := range processNamespaces {
 		log.V(3).Info("[ValidateServiceAccountPermissionsWriteNamespaces]", "namespace", ns, "username", username)
 		// Resource="" means all, while Group="" implies the default "api" containg ConfigMaps
+		// TODO: I want to check all needed verbs: create, update, delete, get!
 		sar := createSubjectAccessReview(username, ns, "update", "configmaps", "", "")
 
 		if err = r.Create(context.TODO(), sar); err != nil {
@@ -337,41 +319,11 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 	}
 
 	if len(failedNamespaces) > 0 {
-
 		errMsg := fmt.Sprintf("insufficient permissions on service account %s. Not authorized to create, update or delete configmaps in the following namespaces %s", username, failedNamespaces)
 		return errors.New(errMsg)
 	}
 
 	return nil
-}
-
-func (r *ConfigMapSyncReconciler) testRequestWithToken(ctx context.Context, token string) error {
-	log := log.FromContext(ctx).WithName("[testRequestWithToken]")
-	log.V(1).Info("create client.Client for using service account token", "token", token)
-
-	scopedClient, err := r.NewScopedClientFromToken(ctx, token)
-	if err != nil {
-		return err
-	}
-	log.V(2).Info("### Creating NewScopedClientFromToken successful")
-
-	// lets try to get a configmap!
-	// WORKS => TODO cleanup
-	cm := &v1.ConfigMap{}
-	nsKey := client.ObjectKey{
-		Namespace: "default",
-		Name:      "sync-me-cm",
-	}
-	err = scopedClient.Get(ctx, nsKey, cm)
-	if err != nil {
-		fmt.Println("Failed GET-ing with newClient, err:", err)
-		return fmt.Errorf("failed GET-ing configmap with token client: %w", err)
-	}
-	fmt.Println("### get request with newclient successful! Content:")
-	fmt.Println(MustMarshal(cm))
-
-	return nil
-
 }
 
 // NewScopedClientFromToken returns a controller-runtime client that authenticates
@@ -416,7 +368,6 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountToken(ctx context.Contex
 	// TODO remove log leaking token
 	fmt.Println("### TokenReview Result:")
 	fmt.Println(MustMarshal(tokenReview))
-
 	if !tokenReview.Status.Authenticated {
 		// use sentinel error
 		return ErrTokenNotAuthenticated

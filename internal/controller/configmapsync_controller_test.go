@@ -116,7 +116,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 					Rules: []rbacv1.PolicyRule{
 						{
 							APIGroups: []string{""},
-							Verbs:     []string{"create", "update", "delete"},
+							Verbs:     []string{"get", "create", "update", "delete"},
 							Resources: []string{"configmaps"},
 						},
 					},
@@ -168,7 +168,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 					Rules: []rbacv1.PolicyRule{
 						{
 							APIGroups: []string{""},
-							Verbs:     []string{"create", "update", "delete"},
+							Verbs:     []string{"get", "create", "update", "delete"},
 							Resources: []string{"configmaps"},
 						},
 					},
@@ -236,11 +236,13 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Client:    k8sClient,
 				Scheme:    k8sClient.Scheme(),
 				Clientset: clientset,
+				Config:    cfg,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: namespacedNameCMS,
 			})
+
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -251,6 +253,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Client:    k8sClient,
 				Scheme:    k8sClient.Scheme(),
 				Clientset: clientset,
+				Config:    cfg,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -285,6 +288,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Client:    k8sClient,
 				Scheme:    k8sClient.Scheme(),
 				Clientset: clientset,
+				Config:    cfg,
 			}
 
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -326,11 +330,10 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Delete(ctx, objectServiceAccount)).To(Succeed())
 
-			// ENVTEST CAN'T DELETE NAMESPACES!
+			// ENVTEST CAN'T DELETE NAMESPACES! This is an explicit limitation:
 			// Source: https://book.kubebuilder.io/reference/envtest.html?utm_source=chatgpt.com#namespace-usage-limitation
 			// By("Ensure target namespace is really deleted")
 			// Eventually(func() error {
-			// 	// TODO doesn't work, list all resource in the namespace to see what is blocking
 			// 	tmpNs := &v1.Namespace{}
 			// 	err := k8sClient.Get(ctx, types.NamespacedName{Name: targetNamespace}, tmpNs)
 			// 	fmt.Println("STILL NOT DELETED target-ns:", objectTargetNamespace)
