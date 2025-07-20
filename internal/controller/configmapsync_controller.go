@@ -118,6 +118,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		readyCond.Reason = "ServiceAccountNotFound"
 		readyCond.Message = err.Error()
+		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
 	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
@@ -126,6 +127,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// SA validation and the reason!
 		readyCond.Reason = "InsufficientServiceAccountPermissions"
 		readyCond.Message = err.Error()
+		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
 
@@ -134,12 +136,14 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		readyCond.Reason = "ServiceAccountTokenRetrievalFailed"
 		readyCond.Message = err.Error()
+		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
 
 	if err := r.validateServiceAccountToken(ctx, token); err != nil {
 		readyCond.Reason = "ServiceAccountValidationFailed"
 		readyCond.Message = err.Error()
+		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
 
@@ -151,6 +155,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		readyCond.Reason = "FailedObtainingScopedKubernetesClientFromToken"
 		readyCond.Message = err.Error()
+		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
 
@@ -164,23 +169,16 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
 		readyCond.Reason = "FailedSyncingConfigMaps"
 		readyCond.Message = err.Error()
+		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
 	meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
-
-	// cluster-logging-forwarder code uses this:
-	// removeStaleStatuses(r.Forwarder)
-	//
-	// readyCond := internalobs.NewCondition(obsv1.ConditionTypeReady, obsv1.ConditionUnknown, obsv1.ReasonUnknownState, "")
-	// defer func() {
-	// 	updateStatus(r.Client, r.Forwarder, readyCond)
-	// }()
 
 	// All successfully reconciled, golden path reached
 	readyCond.Reason = ReasonReconciliationComplete
 	readyCond.Status = metav1.ConditionTrue
 
-	// No error => stops Reconcile
+	// No error => stops Reconcile; meaning it won't get requeued for reconciliation
 	return ctrl.Result{}, nil
 
 	// To reconcile again after X time
@@ -197,12 +195,6 @@ func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
 	// ListOptions is a struct that can e.g. filter by labels
 	nodeList := v1.NodeList{}
 	fmt.Println("### r.List:", nodeList)
-
-	// if err := r.List(ctx, &nodeList, ApplyToListFunc(f)); err != nil {
-
-	// 	panic(err)
-	// }
-	// 	List(ctx context.Context, list ObjectList, opts ...ListOption) error
 
 	if err := r.List(ctx, &nodeList,
 		client.MatchingLabels{"kubernetes.io/hostname": "k3d-mycluster-agent-0"}); err != nil {

@@ -1072,7 +1072,7 @@ In hindsight, I also think this was the right time to learn and apply these less
 
 
 ## Adding Finalizer logic
-TheAt this point, the controller is nearly complete — the last missing piece is cleanup logic. And by "cleanup," I mean implementing proper deletion behavior.
+At this point, the controller is nearly complete — the last missing piece is cleanup logic. And by "cleanup," I mean implementing proper deletion behavior.
 
 Right now, when a namespace is removed from the list of target namespaces, or when the entire ConfigMapSync object is deleted, the synced ConfigMaps are left untouched. I'd like to fix that by ensuring the corresponding ConfigMaps are cleaned up from their respective namespaces in both cases. 
 
