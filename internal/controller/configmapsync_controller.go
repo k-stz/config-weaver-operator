@@ -56,6 +56,10 @@ const (
 	ConditionTypeReady           = "Ready"
 	ReasonUnknownState           = "UnknownState"
 	ReasonReconciliationComplete = "ReconciliationComplete"
+
+	// Conditions
+	SourceConfigMapFound = "SourceConfigMapFound"
+	AllTargetsSynced     = "AllTargetsSynced"
 )
 
 var (
@@ -105,7 +109,11 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// avoiding struct causing race-conditions
 	cms = cms.DeepCopy()
 
-	// r.removeStaleStatuses() // maybe at this point
+	// On each reconciliation we should rebuild the whole status from what is actually
+	// observed. That's why we need to remove status from all previous conditions like
+	// "SourceCOnfigMapFound" or AllTargetsSynced. Else when there is an error they will continue
+	// to show true from a previous successful run!
+	r.removeStaleStatuses(ctx, cms) // maybe at this point
 	readyCond := NewCondition(ConditionTypeReady, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
 	defer func() {
 		// TODO the condition[*].Status field is not set with the failure cases!
@@ -160,7 +168,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Here the main feature of the Operator is executing: syncing configmap accross namespaces
-	var configMapsSyncedCondition metav1.Condition = NewCondition("AllTargetsSynced", metav1.ConditionTrue, cms.Generation, "AllSyncsSuccessful", "")
+	var configMapsSyncedCondition metav1.Condition = NewCondition(AllTargetsSynced, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
 	if err := createConfigMaps(ctx, scopedClient, cms); err != nil {
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
 		configMapsSyncedCondition.Status = metav1.ConditionFalse
@@ -172,6 +180,8 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		readyCond.Status = metav1.ConditionFalse
 		return ctrl.Result{}, err
 	}
+	configMapsSyncedCondition.Status = metav1.ConditionTrue
+	configMapsSyncedCondition.Reason = "AllConfigMapsSynced"
 	meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
 
 	// All successfully reconciled, golden path reached
@@ -184,6 +194,13 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// To reconcile again after X time
 	// thus implementing best practice of
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func (r *ConfigMapSyncReconciler) removeStaleStatuses(ctx context.Context, cms *v1alpha1.ConfigMapSync) {
+	log := log.FromContext(ctx).WithName("[removeStaleStatuses]")
+	log.V(3).Info("prunning all stale stauses")
+	meta.RemoveStatusCondition(&cms.Status.Conditions, SourceConfigMapFound)
+	meta.RemoveStatusCondition(&cms.Status.Conditions, AllTargetsSynced)
 }
 
 func (r *ConfigMapSyncReconciler) runExperiment(ctx context.Context) {
@@ -450,21 +467,20 @@ func MustMarshal(v interface{}) (value string) {
 // Fetch source ConfigMap and ensure the OwnerRef is set for and attempting to Update() it
 // Otherwise error out
 func prepareSourceConfigMap(ctx context.Context, k8sClient client.Client, cms *v1alpha1.ConfigMapSync) (sourceCM *v1.ConfigMap, error error) {
-
-	var sourceCMSFoundCond metav1.Condition = NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "", "")
-
 	log := log.FromContext(ctx).WithName("prepareSourceConfigMap")
 	log.V(1).Info("attempting to get sourceConfigMap")
+
+	var sourceCMSFoundCond metav1.Condition = NewCondition(SourceConfigMapFound, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
 	sourceCM, err := getSourceConfigMap(ctx, k8sClient, cms)
 	if err != nil {
-		NewCondition("SourceConfigMapFound", metav1.ConditionTrue, cms.Generation, "ConfigMapMissing", "Source ConfigMap not found in namespace "+cms.Spec.Source.Namespace)
+		NewCondition(SourceConfigMapFound, metav1.ConditionTrue, cms.Generation, "ConfigMapMissing", "Source ConfigMap not found in namespace "+cms.Spec.Source.Namespace)
 		sourceCMSFoundCond.Status = metav1.ConditionFalse
 		sourceCMSFoundCond.Reason = "ConfigMapMissing"
 		sourceCMSFoundCond.Message = "Source ConfigMap not found in namespace " + cms.Spec.Source.Namespace
-
 		meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
 		return nil, err
 	}
+	sourceCMSFoundCond.Status = metav1.ConditionTrue
 	sourceCMSFoundCond.Reason = "ConfigMapFound"
 	meta.SetStatusCondition(&cms.Status.Conditions, sourceCMSFoundCond)
 
