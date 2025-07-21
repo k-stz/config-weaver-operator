@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controller "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -60,6 +61,7 @@ const (
 	// Conditions
 	SourceConfigMapFound = "SourceConfigMapFound"
 	AllTargetsSynced     = "AllTargetsSynced"
+	FinalizerName        = "configmapsync.io/finalizer"
 )
 
 var (
@@ -98,17 +100,31 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	cms := &v1alpha1.ConfigMapSync{}
 	if err := r.Get(ctx, req.NamespacedName, cms); err != nil {
-		if !apierrors.IsNotFound(err) {
-			log.Error(err, "unable to get configMapSync")
-			// other error, requeue with exponential back-off
-			return ctrl.Result{}, err
+		if apierrors.IsNotFound(err) {
+			// if the CR is not found it usually means it was deleted or not created
+			// In both cases we stop reconciliation
+			log.V(1).Info("ConfigMapSync object not found. Ignring since object must be deleted")
+			return ctrl.Result{}, nil
 		}
+		log.Error(err, "Failed to get ConfigMapSync object")
+		// other error, requeue with exponential back-off
+		return ctrl.Result{}, err
 	}
 	// we create the DeepCopy right of the bat Because the read CMS comes from a
 	// "shared informer" cache (controller-runtime construct) we create a
 	// deepcopy to avoid concurrent Reconcile invokation sharing the receiver structs
 	// avoiding struct causing race-conditions
 	cms = cms.DeepCopy()
+
+	deleted, err := r.handleFinalizerLogic(ctx, cms)
+	if err != nil {
+		log.Error(err, "Failed handling finalizer")
+		return ctrl.Result{}, err
+	}
+	if deleted {
+		log.V(2).Info("ConfigMapSync object is waiting to be deleted by kubernets GC")
+		return ctrl.Result{}, nil
+	}
 
 	// On each reconciliation we should rebuild the whole status from what is actually
 	// observed. That's why we need to remove status from all previous conditions like
@@ -195,6 +211,44 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// To reconcile again after X time
 	// thus implementing best practice of
 	// return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// Handles finalizer Logic for ConfigMapSync
+//
+// Return value deleted = true means:
+// if DeletionTimestamp is set and the finalizer has already been removed. This
+// means the controller has completed its pre-deletion logic and removed its
+// finalizer. At this point, the object is waiting to be deleted by Kubernetes
+// garbage collection. Use this flag to stop reconciliation and return
+// ctrl.Result{}, nil.
+func (r *ConfigMapSyncReconciler) handleFinalizerLogic(ctx context.Context, cms *v1alpha1.ConfigMapSync) (deleted bool, _ error) {
+	log := log.FromContext(ctx).WithName("[finalizerLogic]")
+	log.V(3).Info("Handling finalizer logic")
+	// example DeletionTimestap to determine if object is under deletion
+	if cms.ObjectMeta.DeletionTimestamp.IsZero() {
+		// the object is not being deleted; Check if finalizer is set
+		if !controllerutil.ContainsFinalizer(cms, FinalizerName) {
+			controllerutil.AddFinalizer(cms, FinalizerName)
+			if err := r.Update(ctx, cms); err != nil {
+				return false, fmt.Errorf("Failed adding finalizer: %w", err)
+			}
+		}
+	} else {
+		// The object is being deleted!
+		if controllerutil.ContainsFinalizer(cms, FinalizerName) {
+			// TODO ensure all configmaps in the sync-to target namespace are
+			// deleted except the source ConfigMap
+			// Ensure this is done with the given serviceaccount, so we need to obtain it here
+			controllerutil.RemoveFinalizer(cms, FinalizerName)
+			if err := r.Update(ctx, cms); err != nil {
+				return false, fmt.Errorf("Failed removing finalizer: %w", err)
+			}
+		}
+		// Stop reconciliations: the finalizer is removed and the object is being deleted
+		return true, nil
+	}
+	// Object is neither under deletion nor missing a finalizer
+	return false, nil
 }
 
 func (r *ConfigMapSyncReconciler) removeStaleStatuses(ctx context.Context, cms *v1alpha1.ConfigMapSync) {
