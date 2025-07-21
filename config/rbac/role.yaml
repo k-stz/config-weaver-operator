@@ -7,6 +7,16 @@ rules:
 - apiGroups:
   - weaver.example.com
   resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+- apiGroups:
+  - weaver.example.com
+  resources:
   - configmapsyncs
   verbs:
   - create

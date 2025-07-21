@@ -80,6 +80,7 @@ type ConfigMapSyncReconciler struct {
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs/status,verbs=get;update;patch;create
 // +kubebuilder:rbac:groups=weaver.example.com,resources=configmapsyncs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=weaver.example.com,resources=configmaps,verbs=get;list;create;update;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
