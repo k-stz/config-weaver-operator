@@ -1109,3 +1109,7 @@ That's why Kubernetes controllers should be designed to compute `.status` from t
 Based on this analysis, I see two possible solutions going ahead:
 - Do nothing: Skip implementing cleanup for individual ConfigMaps, allowing them to become "stray cats" in the cluster. The main benefit of this approach is that it's already implemented! 😄
 - Implement proper cleanup using a full-cluster lookup (thisolution "2." proposed above): This aligns with best practices by actively identifying and deleting orphaned ConfigMaps. Depending on performance needs, this could potentially be optimized using indexed lookups to reduce the cost of scanning all ConfigMaps.
+
+## TODO Deletion Logic:
+- when you're going to implement that make sure to add a special case for the source ConfigMap. Lest a user uses the source configmap namespace as a target and then removes it, causing the controller to delete the source ConfigMap in the process.
+- Actually the case that the source ConfigMap is deleted isn't covered!

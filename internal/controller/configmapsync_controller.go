@@ -190,7 +190,7 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Error(err, "unable to create ConfigMaps; Updating status...")
 		configMapsSyncedCondition.Status = metav1.ConditionFalse
 		configMapsSyncedCondition.Reason = "SyncsFailed"
-		configMapsSyncedCondition.Message = "Failed to attempt to sync all target ConfigMaps"
+		configMapsSyncedCondition.Message = "Failed syncing all ConfigMaps"
 		meta.SetStatusCondition(&cms.Status.Conditions, configMapsSyncedCondition)
 		readyCond.Reason = "FailedSyncingConfigMaps"
 		readyCond.Message = err.Error()
