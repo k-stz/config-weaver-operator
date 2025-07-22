@@ -1110,6 +1110,50 @@ Based on this analysis, I see two possible solutions going ahead:
 - Do nothing: Skip implementing cleanup for individual ConfigMaps, allowing them to become "stray cats" in the cluster. The main benefit of this approach is that it's already implemented! 😄
 - Implement proper cleanup using a full-cluster lookup (thisolution "2." proposed above): This aligns with best practices by actively identifying and deleting orphaned ConfigMaps. Depending on performance needs, this could potentially be optimized using indexed lookups to reduce the cost of scanning all ConfigMaps.
 
+## Fix Ginkgo test deletion logic
+With the introduction of finalizers, simply calling Delete() and asserting success is no longer sufficient in the AfterEach block of the Ginkgo test suite. On deletion, Kubernetes sets the deletionTimestamp, but the object remains until the controller processes the finalizer logic and removes the finalizer.
+
+To handle this correctly, we must trigger reconciliation multiple times until the finalizer logic completes and the object is fully deleted.
+
+Since this process is asynchronous, we use Ginkgo’s Eventually construct to poll until the object is actually removed. The loop repeatedly calls Reconcile (if the object still exists), and breaks only when the object has been truely successfully deleted (= removed from etcd). This ensures that the finalizer has run and been removed, allowing Kubernetes to garbage collect the object. 
+
+```go
+	By("Ensuring Object deletion by running reconciling till finalizer logic runs")
+			Eventually(func() bool {
+				// Try to get the resource
+				cms := &weaverv1alpha1.ConfigMapSync{}
+				err := k8sClient.Get(ctx, namespacedNameCMS, cms)
+
+				if apierrors.IsNotFound(err) {
+					// Object has been deleted — this is the endcase finally breaking
+                    // out of the "Eventually" ginko loop
+					return true
+				} else if err != nil {
+					Fail(fmt.Sprintf("Failed to get ConfigMapSync: %v", err))
+					return false
+				}
+
+				// Object still exists — run Reconcile once
+				controllerReconciler := &ConfigMapSyncReconciler{
+					Client:    k8sClient,
+					Scheme:    k8sClient.Scheme(),
+					Clientset: clientset,
+					Config:    cfg,
+				}
+
+				_, reconcileErr := controllerReconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: namespacedNameCMS,
+				})
+				if reconcileErr != nil {
+					Fail(fmt.Sprintf("Reconcile failed: %v", reconcileErr))
+				}
+
+				return false // Keep polling
+			}, time.Second*5, time.Millisecond*100).Should(BeTrue(), "Expected the object to be deleted after reconciliation")
+```
+
+
+
 ## TODO Deletion Logic:
 - when you're going to implement that make sure to add a special case for the source ConfigMap. Lest a user uses the source configmap namespace as a target and then removes it, causing the controller to delete the source ConfigMap in the process.
 - Actually the case that the source ConfigMap is deleted isn't covered!
