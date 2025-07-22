@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -26,6 +27,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -124,7 +126,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, roleObj)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating Rolebinding serviceaccount for namespace ", "default", cmsNamespace+"/"+cmsName))
+			By(fmt.Sprint("creating Rolebinding serviceaccount for namespace ", cmsNamespace+"/"+cmsName))
 			rolebindingObj := &rbacv1.RoleBinding{}
 			roleNamedNamespace = types.NamespacedName{
 				Name:      "cms-sync",
@@ -152,7 +154,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, rolebindingObj)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating rbac Role for the serviceaccount for the namespace ", targetNamespace, cmsNamespace+"/"+cmsName))
+			By(fmt.Sprint("creating rbac Role for the serviceaccount for the namespace ", targetNamespace, " ", cmsNamespace+"/"+cmsName))
 			roleObjTargetNs := &rbacv1.Role{}
 			roleNamedNamespaceTargetNs := types.NamespacedName{
 				Name:      "cms-sync",
@@ -176,7 +178,7 @@ var _ = Describe("ConfigMapSync Controller", func() {
 				Expect(k8sClient.Create(ctx, roleObjTargetNs)).To(Succeed())
 			}
 
-			By(fmt.Sprint("creating Rolebinding serviceaccount for the namespace", targetNamespace, cmsNamespace+"/"+cmsName))
+			By(fmt.Sprint("creating Rolebinding serviceaccount for the namespace default", targetNamespace, cmsNamespace+"/"+cmsName))
 			rolebindingObjTargetNs := &rbacv1.RoleBinding{}
 			roleNamedNamespaceTargetNs = types.NamespacedName{
 				Name:      "cms-sync",
@@ -317,6 +319,39 @@ var _ = Describe("ConfigMapSync Controller", func() {
 			err := k8sClient.Get(ctx, namespacedNameCMS, objectCMS)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Delete(ctx, objectCMS)).To(Succeed())
+
+			By("Ensuring Object deletion by running reconciling till finalizer logic runs")
+			Eventually(func() bool {
+				// Try to get the resource
+				cms := &weaverv1alpha1.ConfigMapSync{}
+				err := k8sClient.Get(ctx, namespacedNameCMS, cms)
+
+				if apierrors.IsNotFound(err) {
+					// Object has been deleted — we're done
+					return true
+				} else if err != nil {
+					// Unexpected error
+					Fail(fmt.Sprintf("Failed to get ConfigMapSync: %v", err))
+					return false
+				}
+
+				// Object still exists — run Reconcile once
+				controllerReconciler := &ConfigMapSyncReconciler{
+					Client:    k8sClient,
+					Scheme:    k8sClient.Scheme(),
+					Clientset: clientset,
+					Config:    cfg,
+				}
+
+				_, reconcileErr := controllerReconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: namespacedNameCMS,
+				})
+				if reconcileErr != nil {
+					Fail(fmt.Sprintf("Reconcile failed: %v", reconcileErr))
+				}
+
+				return false // Keep polling
+			}, time.Second*5, time.Millisecond*100).Should(BeTrue(), "Expected the object to be deleted after reconciliation")
 
 			By("Cleanup the source ConfigMap")
 			objectSourceCM := &v1.ConfigMap{}
