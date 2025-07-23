@@ -238,10 +238,25 @@ func (r *ConfigMapSyncReconciler) handleFinalizerLogic(ctx context.Context, cms 
 	} else {
 		// The object is being deleted!
 		if controllerutil.ContainsFinalizer(cms, FinalizerName) {
-			// TODO ensure all configmaps in the sync-to target namespace are
-			// deleted except the source ConfigMap
-			// Ensure this is done with the given serviceaccount, so we need to obtain it here
+			sa, err := r.getServiceAccountFromCMS(ctx, cms)
+			if err != nil {
+				return false, fmt.Errorf("Failed getting SA from CMS for deletion cleanup: %w", err)
+			}
+			token, err := r.FetchServiceAccountToken(ctx, sa)
+			if err != nil {
+				return false, fmt.Errorf("Failed getting Token from SA for deletion cleanup: %w", err)
+			}
+			scopedClient, err := r.NewScopedClientFromToken(ctx, token)
+			if err != nil {
+				return false, fmt.Errorf("Failed getting scoped client for deletion cleanup: %w", err)
+			}
+			// TODO: mostly works removing the cms and target configmaps
+			// but throws reconciler error when patching the finalizer out
+			if err := deleteConfigMaps(ctx, scopedClient, cms); err != nil {
+				return false, fmt.Errorf("Failed deleting all configmaps for finalizer cleanup: %w", err)
+			}
 			controllerutil.RemoveFinalizer(cms, FinalizerName)
+
 			if err := r.Update(ctx, cms); err != nil {
 				return false, fmt.Errorf("Failed removing finalizer: %w", err)
 			}
@@ -612,6 +627,38 @@ func createConfigMaps(ctx context.Context, k8sClient client.Client, cms *v1alpha
 	}
 
 	return nil
+}
+
+// Used by finalize pre-delete hook to remove all configmaps in target namespaces sparing the source
+// configmap
+func deleteConfigMaps(ctx context.Context, k8sClient client.Client, cms *v1alpha1.ConfigMapSync) error {
+	log := log.FromContext(ctx).WithName("[deleteConfigMaps]")
+
+	cmName := cms.Spec.Source.Name
+	if cmName == "" {
+		return fmt.Errorf("Empty source ConfigMap abborting target configmap deletion")
+	}
+
+	for _, namespace := range cms.Spec.SyncToNamespaces {
+		cm := v1.ConfigMap{}
+		nsKey := client.ObjectKey{
+			Namespace: namespace,
+			Name:      cmName,
+		}
+		if err := k8sClient.Get(ctx, nsKey, &cm); err != nil {
+			if client.IgnoreNotFound(err) != nil {
+				return fmt.Errorf("Couldn't GET dependent configmap %v for deletion: %w", nsKey, err)
+			}
+			continue // already deleted
+		}
+		log.V(3).Info("Deleting ConfigMap", "name", nsKey.Name, "namespace", nsKey.Namespace)
+		// It suffices for the Delete request succeeded
+		if err := k8sClient.Delete(ctx, &cm); err != nil {
+			return fmt.Errorf("Failed deleting configmap %v : %w", nsKey, err)
+		}
+	}
+	return nil // all configmap successfully deleted
+
 }
 
 func getSourceConfigMap(ctx context.Context, k8sClient client.Client, cms *v1alpha1.ConfigMapSync) (*v1.ConfigMap, error) {
