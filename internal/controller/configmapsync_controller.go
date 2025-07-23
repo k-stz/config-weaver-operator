@@ -93,27 +93,27 @@ type ConfigMapSyncReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-
-	log := log.FromContext(ctx).WithName("Reconcile") // prepends name to log lines
+	// Creates a logger with the name "[Reconcile]" added to the context, allowing log
+	// entries to be identified as originating from the Reconcile function.
+	log := log.FromContext(ctx).WithName("[Reconcile]")
 	if log.Enabled() {
 		log.V(1).Info("Reconcile invoked with Request: " + req.String())
 	}
 	cms := &v1alpha1.ConfigMapSync{}
 	if err := r.Get(ctx, req.NamespacedName, cms); err != nil {
 		if apierrors.IsNotFound(err) {
-			// if the CR is not found it usually means it was deleted or not created
-			// In both cases we stop reconciliation
-			log.V(1).Info("ConfigMapSync object not found. Ignring since object must be deleted")
+			// If the ConfigMapSync resource is not found, it indicates the resource was
+			// deleted or never existed. => stop reconciliation
+			log.V(1).Info("ConfigMapSync object not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
 		log.Error(err, "Failed to get ConfigMapSync object")
-		// other error, requeue with exponential back-off
 		return ctrl.Result{}, err
 	}
-	// we create the DeepCopy right of the bat Because the read CMS comes from a
-	// "shared informer" cache (controller-runtime construct) we create a
-	// deepcopy to avoid concurrent Reconcile invokation sharing the receiver structs
-	// avoiding struct causing race-conditions
+
+	// Create a deep copy of the ConfigMapSync object to avoid race conditions, as the
+	// original comes from a shared informer cache and could be modified by concurrent
+	// reconciliations. This ensures each reconciliation operates on an independent copy.
 	cms = cms.DeepCopy()
 
 	deleted, err := r.handleFinalizerLogic(ctx, cms)
@@ -126,18 +126,22 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// On each reconciliation we should rebuild the whole status from what is actually
-	// observed. That's why we need to remove status from all previous conditions like
-	// "SourceCOnfigMapFound" or AllTargetsSynced. Else when there is an error they will continue
-	// to show true from a previous successful run!
-	r.removeStaleStatuses(ctx, cms) // maybe at this point
+	// As per Kubernetes best practice we rebuild the status conditions (e.g.,
+	// SourceConfigMapFound, AllTargetsSynced) during each reconciliation to reflect the
+	// latest observed state. First we clear stale conditions to prevent outdated or
+	// misleading statuses, such as a condition remaining true after an error, and avoid
+	// relying on the existing status field.
+	r.removeStaleStatuses(ctx, cms)
 	readyCond := NewCondition(ConditionTypeReady, metav1.ConditionUnknown, cms.Generation, ReasonUnknownState, "")
+	// By deferring the status update, we ensure the Ready condition is always updated to
+	// reflect the final outcome of the reconciliation — including failures. The deferred
+	// closure captures and updates the `readyCond` variable, which is modified later in
+	// the reconciliation path if errors occur.
 	defer func() {
-		// TODO the condition[*].Status field is not set with the failure cases!
 		r.updateStatus(ctx, cms, readyCond)
 	}()
-	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", cms.Spec.TestNum))
-	// So now we have a ConfigMapSync object,
+	log.V(1).Info(fmt.Sprint("ConfigMapSync testNum:", cms.Spec.TestNum)) // for debugging only!
+
 	// First test if spec.serviceAccount is valid
 	sa, err := r.getServiceAccountFromCMS(ctx, cms)
 	if err != nil {
@@ -148,8 +152,6 @@ func (r *ConfigMapSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	log.V(1).Info("serviceaccount successfully retrieved", "Content", sa)
 	if err := r.validateServiceAccountPermissions(ctx, sa, cms); err != nil {
-		// TODO either in the method, or here, set the status.condition indicating the failed
-		// SA validation and the reason!
 		readyCond.Reason = "InsufficientServiceAccountPermissions"
 		readyCond.Message = err.Error()
 		readyCond.Status = metav1.ConditionFalse
@@ -333,7 +335,6 @@ func ServiceaAccountUsername(sa *v1.ServiceAccount) (username string) {
 }
 
 func (r *ConfigMapSyncReconciler) getServiceAccountFromCMS(ctx context.Context, cms *v1alpha1.ConfigMapSync) (*v1.ServiceAccount, error) {
-	// TODO: add condition serviceAccountFound?
 	saName := cms.Spec.ServiceAccount.Name //
 	log := log.FromContext(ctx).WithName("getServiceAccountFromCMS")
 	log.V(1).Info("try retrieving sa from cms.spec.serviceAccount", "name", saName)
@@ -371,6 +372,8 @@ func (r *ConfigMapSyncReconciler) validateServiceAccountPermissions(ctx context.
 		log.V(3).Info("[ValidateServiceAccountPermissionsWriteNamespaces]", "namespace", ns, "username", username)
 		// Resource="" means all, while Group="" implies the default "api" containg ConfigMaps
 		// TODO: I want to check all needed verbs: create, update, delete, get!
+		// Apparently SAR only supports a single verb, so you should rather try to test
+		// all verbs in a loop
 		sar := createSubjectAccessReview(username, ns, "update", "configmaps", "", "")
 
 		if err = r.Create(context.TODO(), sar); err != nil {
