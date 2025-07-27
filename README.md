@@ -72,9 +72,9 @@ func (c *TokenCache) Set(key, token string) {
 
 
 Metrics
-- [ ] What metrics are available by default
-- [ ] How can they be scraped
-- [ ] What additional metrics can be exposed? Best practice?
+- [x] What metrics are available by default => have to start the main.go with a command line argument to automatically start the metrics server. For example (see the Makefile target `run-metrics`): `go run ./cmd/main.go -metrics-bind-address ":8080" --metrics-secure=false`
+- [x] How can they be scraped => After the metrics server is strated by providing the cli flag, they can be scraped at the `/metrics` endpoint, as is custom with a prometheus metrics endpoint. So when listening on port :8080 locally scrape them like so `curl http://localhost:8080/metrics` 
+- [x] What additional metrics can be exposed? Best practice? => The default provided metrics are quite extensive, I don't see an immediate reason to scrape custom ones 
 
 Other Features:
 - [ ] Analyze how the concept of Informers and workqueues impact Operator development. Is it just a performance feature?

@@ -1157,3 +1157,66 @@ Since this process is asynchronous, we use Ginkgo’s Eventually construct to po
 ## TODO Deletion Logic:
 - when you're going to implement that make sure to add a special case for the source ConfigMap. Lest a user uses the source configmap namespace as a target and then removes it, causing the controller to delete the source ConfigMap in the process.
 - Actually the case that the source ConfigMap is deleted isn't covered!
+
+# Metrics
+You can start a metrics server along-side the operator by setting an option. We're also disabling securing metrics, else we have to deal with getting authorization via https (and noa `-k` flag in curl wouldn't suffice):
+```bash
+go run cmd/main.go -metrics-bind-address ":8080" --metrics-secure=false
+```
+
+## What Metrics are collected
+Fetch the metrics:
+```bash
+ curl http://localhost:8080/metrics
+```
+
+There are workers broadly about 
+- controller-runtie and the controller reconciliation, a histogram about its performance, errors, panics, 
+- about the golang runtime (allocations, gc, os/sys times, resident memory etc., the go-version used), 
+- go concurrency: number of goroutines, kernel threads, 
+
+Here is a subset of the metrics collected:
+
+```conf
+# HELP controller_runtime_active_workers Number of currently used workers per controller
+# TYPE controller_runtime_active_workers gauge
+controller_runtime_active_workers{controller="configmapsync"} 0
+# HELP controller_runtime_reconcile_errors_total Total number of reconciliation errors per controller
+# TYPE controller_runtime_reconcile_errors_total counter
+controller_runtime_reconcile_errors_total{controller="configmapsync"} 0
+# HELP controller_runtime_reconcile_time_seconds Length of time per reconciliation per controller
+# TYPE controller_runtime_reconcile_time_seconds histogram
+controller_runtime_reconcile_time_seconds_bucket{controller="configmapsync",le="0.005"} 0
+# HELP controller_runtime_reconcile_total Total number of reconciliations per controller
+# TYPE controller_runtime_reconcile_total counter
+controller_runtime_reconcile_total{controller="configmapsync",result="error"} 0
+controller_runtime_reconcile_total{controller="configmapsync",result="requeue"} 0
+controller_runtime_reconcile_total{controller="configmapsync",result="requeue_after"} 0
+controller_runtime_reconcile_total{controller="configmapsync",result="success"} 2
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 52
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.24.4"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated and still in use.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 4.224176e+06
+# HELP go_memstats_heap_objects Number of allocated objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 22189
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 10
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 9
+# HELP rest_client_requests_total Number of HTTP requests, partitioned by status code, method, and host.
+# TYPE rest_client_requests_total counter
+rest_client_requests_total{code="200",host="raspik3d:44949",method="GET"} 16
+rest_client_requests_total{code="200",host="raspik3d:44949",method="PUT"} 6
+rest_client_requests_total{code="201",host="raspik3d:44949",method="POST"} 8
+# HELP workqueue_retries_total Total number of retries handled by workqueue
+# TYPE workqueue_retries_total counter
+workqueue_retries_total{controller="configmapsync",name="configmapsync"} 0
+```

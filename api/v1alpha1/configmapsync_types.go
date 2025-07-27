@@ -25,9 +25,6 @@ import (
 
 // ConfigMapSyncSpec defines the desired state of ConfigMapSync
 type ConfigMapSyncSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
 	// This comment will be used as the description of the field!
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	TestNum int32 `json:"testNum,omitempty"`
@@ -69,9 +66,6 @@ type Source struct {
 
 // ConfigMapSyncStatus defines the observed state of ConfigMapSync
 type ConfigMapSyncStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
